@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/stilo0Q/bin/env bash
 
 set -e
 
