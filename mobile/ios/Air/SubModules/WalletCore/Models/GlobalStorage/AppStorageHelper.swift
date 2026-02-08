@@ -109,6 +109,17 @@ public struct AppStorageHelper {
         return GlobalStorage["selectedCurrencyKey"] as? String ?? "USD"
     }
 
+    private static let selectedExplorerIdsKey = "settings.selectedExplorerIds"
+    public static func selectedExplorerId(for chain: ApiChain) -> String? {
+        guard let dict = GlobalStorage.getDict(key: selectedExplorerIdsKey) else { return nil }
+        return dict[chain.rawValue] as? String
+    }
+    public static func save(selectedExplorerId: String, for chain: ApiChain) {
+        var dict = GlobalStorage.getDict(key: selectedExplorerIdsKey) ?? [:]
+        dict[chain.rawValue] = selectedExplorerId
+        GlobalStorage.set(key: selectedExplorerIdsKey, value: dict, persistInstantly: true)
+    }
+
     // MARK: - Current Token Time Period
     public static func save(currentTokenPeriod: String) {
         guard let activeAccountId = AccountStore.accountId else {
@@ -158,16 +169,17 @@ public struct AppStorageHelper {
     }
 
     // MARK: - Is biometric auth enabled
-    private static var isBiometricActivatedKey = "settings.authConfig.kind"
+    private static let isBiometricActivatedKey = "settings.authConfig.kind"
+    private enum AuthKind: String {
+        case password
+        case nativeBiometrics = "native-biometrics"
+    }
     public static func save(isBiometricActivated: Bool) {
-        if isBiometricActivated {
-            GlobalStorage.set(key: isBiometricActivatedKey, value: "native-biometrics", persistInstantly: true)
-        } else {
-            GlobalStorage.remove(key: isBiometricActivatedKey, persistInstantly: true)
-        }
+        let kind: AuthKind = isBiometricActivated ? .nativeBiometrics : .password
+        GlobalStorage.set(key: isBiometricActivatedKey, value: kind.rawValue, persistInstantly: true)
     }
     public static func isBiometricActivated() -> Bool {
-        return GlobalStorage.getString(key: isBiometricActivatedKey) == "native-biometrics"
+        GlobalStorage.getString(key: isBiometricActivatedKey) == AuthKind.nativeBiometrics.rawValue
     }
     
     // MARK: - Sensitive data

@@ -6,6 +6,7 @@ import type { Account, UserToken } from '../../../../global/types';
 
 import {
   selectAccountStakingStates,
+  selectCurrentAccountId,
   selectCurrentAccountTokens,
   selectNetworkAccounts,
 } from '../../../../global/selectors';
@@ -98,21 +99,23 @@ function AccountSelector({
           </SensitiveData>
         </div>
       )}
-      <button
-        type="button"
-        className={accountTitleClassName}
-        aria-label={lang('Switch Account')}
-        aria-haspopup="dialog"
-        onClick={withAccountSelector ? handleOpenAccountSelector : undefined}
-        disabled={!withAccountSelector}
-      >
-        <span className={styles.accountTitleInner}>
-          {(currentAccount && getAccountTitle(currentAccount)) ?? ''}
-        </span>
-        {withAccountSelector && !withBalance && (
-          <i className={buildClassName('icon icon-expand', styles.expandIcon)} aria-hidden />
-        )}
-      </button>
+      {Boolean(currentAccount) && (
+        <button
+          type="button"
+          className={accountTitleClassName}
+          aria-label={lang('Switch Account')}
+          aria-haspopup="dialog"
+          onClick={withAccountSelector ? handleOpenAccountSelector : undefined}
+          disabled={!withAccountSelector}
+        >
+          <span className={styles.accountTitleInner}>
+            {getAccountTitle(currentAccount)}
+          </span>
+          {withAccountSelector && !withBalance && (
+            <i className={buildClassName('icon icon-expand', styles.expandIcon)} aria-hidden />
+          )}
+        </button>
+      )}
     </Transition>
   );
 }
@@ -128,9 +131,8 @@ export default memo(withGlobal<OwnProps>(
     } = global;
 
     const accounts = selectNetworkAccounts(global);
-    const currentAccountId = global.currentAccountId!;
+    const currentAccountId = selectCurrentAccountId(global)!;
     const currentAccount = accounts?.[currentAccountId];
-
     const stakingStates = selectAccountStakingStates(global, currentAccountId);
 
     return {
@@ -142,5 +144,5 @@ export default memo(withGlobal<OwnProps>(
       isSensitiveDataHidden,
     };
   },
-  (global, _, stickToFirst) => stickToFirst(global.currentAccountId),
+  (global, _, stickToFirst) => stickToFirst(selectCurrentAccountId(global)),
 )(AccountSelector));

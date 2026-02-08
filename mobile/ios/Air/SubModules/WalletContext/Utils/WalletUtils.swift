@@ -15,6 +15,7 @@ public let TONCOIN_SLUG = "toncoin"
 public let TON_USDT_SLUG = "ton-eqcxe6mutq"
 public let TRX_SLUG = "trx"
 public let TRON_USDT_SLUG = "tron-tr7nhqjekq"
+public let TRON_USDT_TESTNET_SLUG = "tron-tg3xxyexbk"
 public let MYCOIN_SLUG = "ton-eqcfvnlrbn"
 public let STAKED_TON_SLUG = "ton-eqcqc6ehrj"
 public let STAKED_MYCOIN_SLUG = "ton-eqcbzvsfwq"
@@ -32,11 +33,11 @@ public let DIESEL_TOKENS = [
 ]
 
 fileprivate let decimalSeparator = "."
+public let signSpace = "\u{2009}"
+fileprivate let thousandSpace: Character = " "
 
 public let walletAddressLength: Int = 48
 public let walletTextLimit: Int = 120
-
-public var isRTL = false
 
 public var supportedTonConnectVersion = 2
 
@@ -52,15 +53,6 @@ public var devicePlatform: String {
     }
 }
 public let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-
-// format address to 2-line text
-public func formatAddress(_ address: String) -> String {
-    var address = address
-    if address.count % 2 == 0 {
-        address.insert("\n", at: address.index(address.startIndex, offsetBy: address.count / 2))
-    }
-    return address
-}
 
 public func formatStartEndAddress(_ address: String, prefix: Int = 6, suffix: Int = 6, separator: String = "···") -> String {
     if address.count < prefix + suffix + 3 {
@@ -106,7 +98,7 @@ public func formatAddressAttributed(
 
     } else {
 
-        let primaryFont = primaryFont ?? UIFont.systemFont(ofSize: 16, weight: .regular)
+        let primaryFont = primaryFont ?? UIFont.systemFont(ofSize: 17, weight: .regular)
         let secondaryFont = secondaryFont ?? primaryFont
         let primaryColor = primaryColor ?? WTheme.primaryLabel
         let secondaryColor = secondaryColor ?? WTheme.secondaryLabel
@@ -147,7 +139,7 @@ public func formatAddressAttributed(
     return at
 }
 
-fileprivate func insertGroupingSeparator(in string: String, separator: Character = " ", every nthPosition: Int = 3) -> String {
+fileprivate func insertGroupingSeparator(in string: String, separator: Character = thousandSpace, every nthPosition: Int = 3) -> String {
     var result = ""
     var count = 0
     var hasDot = string.contains(".")
@@ -191,7 +183,7 @@ public func formatBigIntText(_ value: BigInt,
                             forceCurrencyToRight: Bool = false,
                             roundUp: Bool = true) -> String {
     let rounded: BigInt = if let decimalsCount {
-        value.rounded(digitsToRound: tokenDecimals - decimalsCount, roundUp: roundUp)
+        value.rounded(digitsToRound: tokenDecimals - decimalsCount, roundHalfUp: roundUp)
     } else {
         value
     }
@@ -217,50 +209,24 @@ public func formatBigIntText(_ value: BigInt,
     }
 
     if value < 0, negativeSign {
-        result.insert("-", at: result.startIndex)
+        result.insert(contentsOf: "-\(signSpace)", at: result.startIndex)
     } else if value >= 0, positiveSign {
-        result.insert("+", at: result.startIndex)
+        result.insert(contentsOf: "+\(signSpace)", at: result.startIndex)
     }
 
     return result
 }
 
-public func formatAmountText(amount: Double,
-                             currency: String? = nil,
-                             negativeSign: Bool = true,
-                             positiveSign: Bool = false,
-                             decimalsCount: Int? = nil,
-                             forceCurrencyToRight: Bool = false) -> String {
-    let numberFormatter = NumberFormatter()
-    numberFormatter.numberStyle = .decimal
-    numberFormatter.groupingSeparator = " "
-    numberFormatter.decimalSeparator = decimalSeparator
-    numberFormatter.maximumFractionDigits = decimalsCount ?? 9
-    numberFormatter.roundingMode = .halfUp
-    let amountString = numberFormatter.string(from: NSNumber(value: amount))!
-    let parts = amountString.components(separatedBy: decimalSeparator)
-    let integerPart = parts[0]
-    var result = ""
-    result = "\(integerPart)\(result)"
-    if parts.count > 1 {
-        let afterDecimals = decimalsCount != nil ? String(parts[1].prefix(decimalsCount!)) : parts[1]
-        result = "\(result)\(decimalSeparator)\(afterDecimals)"
+/// Expects value 0...1 (0.42 -> 42%)
+public func formatPercent(_ value: Double, decimals: Int = 2, showPlus: Bool = true, showMinus: Bool = true) -> String {
+    let value = (value * 100).rounded(decimals: decimals)
+    return if showPlus && value > 0 {
+        "+\(signSpace)\(value)%"
+    } else if showMinus && value < 0 {
+        "-\(signSpace)\(abs(value))%"
+    } else {
+        "\(abs(value))%"
     }
-
-    if amount < 0, negativeSign {
-        result.insert("-", at: result.startIndex)
-    } else if amount >= 0, positiveSign {
-        result.insert("+", at: result.startIndex)
-    }
-
-    if let currency, currency.count > 0 {
-        if currency.count > 1 || forceCurrencyToRight || currency == "₽" {
-            return "\(result) \(currency)"
-        } else {
-            return "\(currency)\(result)"
-        }
-    }
-    return result
 }
 
 // timestamp into string
@@ -278,28 +244,12 @@ public func stringForTimestamp(timestamp: Int32, local: Bool = true) -> String {
 
 public func stringForShortTimestamp(hours: Int32, minutes: Int32) -> String {
     let hourString: String = hours < 10 ? "0\(hours)" : "\(hours)"
-    /*if hours == 0 {
-        hourString = "12"
-    } else if hours > 12 {
-        hourString = "\(hours - 12)"
-    } else {
-        hourString = "\(hours)"
-    }*/
-
-    /*let periodString: String
-    if hours >= 12 {
-        periodString = "PM"
-    } else {
-        periodString = "AM"
-    }*/
     if minutes >= 10 {
         return "\(hourString):\(minutes)"// \(periodString)"
     } else {
         return "\(hourString):0\(minutes)"// \(periodString)"
     }
 }
-
-//private let maxIntegral: Int64 = Int64.max / 1000000000
 
 public func amountValue(_ string: String, digits: Int) -> BigInt {
     let string = string
@@ -311,9 +261,6 @@ public func amountValue(_ string: String, digits: Int) -> BigInt {
         let string = integralPart + "\(fractionalPart.prefix(digits))" + String(repeating: "0", count: max(0, digits - fractionalPart.count))
         return BigInt(string) ?? 0
     } else if let integral = BigInt(string) {
-//        if integral > BigInt.max / powI64(10, digits) {
-//            return 0
-//        }
         return integral * powI64(10, digits)
     }
     return 0
@@ -384,31 +331,23 @@ public func parseTonTransferUrl(_ url: URL) -> TonTransferUrl? {
     return TonTransferUrl(address: address, amount: amount, comment: comment, token: token, bin: bin, jetton: jetton, stateInit: stateInit)
 }
 
-private func _tokenDecimals(for amountVal: BigInt, tokenDecimals: Int) -> Int {
-    if tokenDecimals <= 2 {
+public func tokenDecimals(for amount: BigInt, tokenDecimals: Int, minimumSignificantDigits: Int = 2) -> Int {
+    if tokenDecimals <= minimumSignificantDigits {
         return tokenDecimals
     }
-    let amount = abs(amountVal)
+    let amount = abs(amount)
     if amount < 2 {
         return tokenDecimals
     }
-    if "\(amount)".count >= tokenDecimals + 2 {
-        return max(2, 1 + tokenDecimals - "\(amount)".count)
+    let len = "\(amount)".count
+    if len >= tokenDecimals + 2 {
+        return max(minimumSignificantDigits, 1 + tokenDecimals - len)
     }
-    let newAmount = abs(amount)
-    var multiplier = 2
-    while "\(newAmount)".count + multiplier < tokenDecimals + 2 {
+    var multiplier = minimumSignificantDigits
+    while len + multiplier < tokenDecimals + 2 {
         multiplier += 1
     }
     return min(tokenDecimals, multiplier)
-}
-
-public func tokenDecimals(for amountVal: BigInt, tokenDecimals: Int) -> Int {
-    return _tokenDecimals(for: amountVal, tokenDecimals: tokenDecimals)
-}
-
-public func tokenDecimals(for amountVal: Double, tokenDecimals: Int) -> Int {
-    return _tokenDecimals(for: doubleToBigInt(amountVal, decimals: tokenDecimals), tokenDecimals: tokenDecimals)
 }
 
 public func doubleToBigInt(_ doubleValue: Double, decimals: Int) -> BigInt {

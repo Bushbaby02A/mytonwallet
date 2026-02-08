@@ -23,6 +23,10 @@ export default async function init(onUpdate: OnApiUpdate, args: ApiInitArgs) {
 
   initWindowConnector();
 
+  if (args.langCode) {
+    void storage.setItem('langCode', args.langCode);
+  }
+
   methods.initAccounts(onUpdate);
   methods.initPolling(onUpdate);
   methods.initTransfer(onUpdate);

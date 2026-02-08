@@ -161,12 +161,12 @@
       },
       {
         "name": "toggleSelfFullSize",
-        "signature": "(options: { isFullSize: boolean; }) => Promise<void>",
+        "signature": "(options: { isFullSize: boolean; onFocus?: boolean; }) => Promise<void>",
         "parameters": [
           {
             "name": "options",
             "docs": "",
-            "type": "{ isFullSize: boolean; }"
+            "type": "{ isFullSize: boolean; onFocus?: boolean | undefined; }"
           }
         ],
         "returns": "Promise<void>",
@@ -357,6 +357,10 @@
           "complexTypes": []
         },
         {
+          "text": "'transaction'",
+          "complexTypes": []
+        },
+        {
           "text": "'transaction-info'",
           "complexTypes": []
         },
@@ -366,10 +370,6 @@
         },
         {
           "text": "'backup'",
-          "complexTypes": []
-        },
-        {
-          "text": "'add-account'",
           "complexTypes": []
         },
         {
@@ -406,6 +406,10 @@
         },
         {
           "text": "'onramp-widget'",
+          "complexTypes": []
+        },
+        {
+          "text": "'offramp-widget'",
           "complexTypes": []
         },
         {

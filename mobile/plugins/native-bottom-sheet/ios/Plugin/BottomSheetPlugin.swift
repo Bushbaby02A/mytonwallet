@@ -295,6 +295,15 @@ public class BottomSheetPlugin: CAPPlugin, FloatingPanelControllerDelegate {
 
         animateTo(to: halfSize ? .half : .full, duration: animated ? nil : 0)
     }
+    
+    public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
+        if let url = navigationAction.request.url, url.host == "my.tt" {
+            let mtw = URL(string: url.absoluteString.replacingOccurrences(of: "https://my.tt/", with: "mtw://"))!
+            UIApplication.shared.open(mtw)
+            return true
+        }
+        return false
+    }
 
     @objc func toggleSelfFullSize(_ call: CAPPluginCall) {
         guard ensureLocalOrigin() else {
@@ -310,15 +319,18 @@ public class BottomSheetPlugin: CAPPlugin, FloatingPanelControllerDelegate {
                 return
             }
 
-            let topVc = self.bridge!.viewController!.parent!.presentingViewController as! CAPBridgeViewController
-            let topBottomSheetPlugin = topVc.bridge!.plugin(withName: "BottomSheet") as! BottomSheetPlugin
+            guard
+                let topVc = self.bridge?.viewController?.parent?.presentingViewController as? CAPBridgeViewController,
+                let topBottomSheetPlugin = topVc.bridge?.plugin(withName: "BottomSheet") as? BottomSheetPlugin
+            else { return }
 
             if !topBottomSheetPlugin.isHalfSize {
                 return
             }
 
             let isFullSize = call.getBool("isFullSize") == true
-            let layout = topBottomSheetPlugin.fpc.layout as! MyPanelLayout
+            let onFocus = call.getBool("onFocus") == true
+            guard let layout = topBottomSheetPlugin.fpc.layout as? MyPanelLayout else { return }
 
             if isFullSize && layout.anchors[.full] == nil {
                 layout.anchors[.full] = layout.fullAnchor
@@ -326,7 +338,28 @@ public class BottomSheetPlugin: CAPPlugin, FloatingPanelControllerDelegate {
               layout.anchors[.full] = nil
             }
 
-            topBottomSheetPlugin.animateTo(to: isFullSize ? .full : .half)
+            if #available(iOS 26, *), isFullSize, onFocus {
+                var didAnimate = false
+                var observer: NSObjectProtocol?
+                observer = NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidShowNotification, object: nil, queue: .main) { _ in
+                    guard !didAnimate else { return }
+                    didAnimate = true
+                    topBottomSheetPlugin.animateTo(to: .full)
+                    if let obs = observer {
+                        NotificationCenter.default.removeObserver(obs)
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    guard !didAnimate else { return }
+                    didAnimate = true
+                    topBottomSheetPlugin.animateTo(to: .full)
+                    if let obs = observer {
+                        NotificationCenter.default.removeObserver(obs)
+                    }
+                }
+            } else {
+                topBottomSheetPlugin.animateTo(to: isFullSize ? .full : .half)
+            }
         }
     }
 

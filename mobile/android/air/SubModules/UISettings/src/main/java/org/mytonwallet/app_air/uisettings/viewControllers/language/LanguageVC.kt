@@ -28,23 +28,21 @@ import java.lang.ref.WeakReference
 
 class LanguageVC(context: Context) : WViewController(context),
     WRecyclerViewAdapter.WRecyclerViewDataSource {
+    override val TAG = "Language"
 
     companion object {
         val languages = arrayOf(
             WLanguage.ENGLISH,
-            WLanguage.RUSSIAN,
-
-            /*WLanguage.CHINESE_SIMPLIFIED,
-            WLanguage.CHINESE_TRADITIONAL,
-            WLanguage.ENGLISH,
-            WLanguage.GERMAN,
-            WLanguage.PERSIAN,
-            WLanguage.POLISH,
-            WLanguage.RUSSIAN,
             WLanguage.SPANISH,
-            WLanguage.THAI,
+            WLanguage.RUSSIAN,
+            WLanguage.CHINESE_SIMPLIFIED,
+            WLanguage.CHINESE_TRADITIONAL,
             WLanguage.TURKISH,
-            WLanguage.UKRAINIAN,*/
+            WLanguage.GERMAN,
+            WLanguage.THAI,
+            WLanguage.UKRAINIAN,
+            WLanguage.POLISH,
+            //WLanguage.PERSIAN,
         )
 
         val HEADER_CELL = WCell.Type(1)
@@ -129,14 +127,12 @@ class LanguageVC(context: Context) : WViewController(context),
             HEADER_CELL -> {
                 HeaderCell(
                     context,
+                    20f
                 )
             }
 
             else -> {
-                TitleSubtitleSelectionCell(
-                    context,
-                    ConstraintLayout.LayoutParams(MATCH_PARENT, 72.dp)
-                )
+                TitleSubtitleSelectionCell(context)
             }
         }
     }
@@ -150,7 +146,7 @@ class LanguageVC(context: Context) : WViewController(context),
             0 -> {
                 (cellHolder.cell as HeaderCell).configure(
                     title = LocaleController.getString("Language"),
-                    titleColor = WColor.Tint.color
+                    titleColor = WColor.Tint
                 )
             }
 

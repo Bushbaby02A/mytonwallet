@@ -6,20 +6,26 @@ import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
 import org.mytonwallet.app_air.walletcore.MYCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.TONCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.TON_USDT_SLUG
+import org.mytonwallet.app_air.walletcore.TON_USDT_TESTNET_SLUG
 import org.mytonwallet.app_air.walletcore.USDE_SLUG
-import org.mytonwallet.app_air.walletcore.stores.AccountStore
 import org.mytonwallet.app_air.walletcore.stores.BalanceStore
 import org.mytonwallet.app_air.walletcore.stores.StakingStore
 import org.mytonwallet.app_air.walletcore.stores.TokenStore
 import java.math.BigInteger
 
 data class MAssetsAndActivityData(
+    var accountId: String = "",
     var hiddenTokens: ArrayList<String> = ArrayList(),
     var visibleTokens: ArrayList<String> = ArrayList(),
     var deletedTokens: ArrayList<String> = ArrayList(),
     var addedTokens: ArrayList<String> = ArrayList(),
 ) {
+    companion object {
+        val NOT_REMOVABLE_TOKENS = setOf(TON_USDT_SLUG, TON_USDT_TESTNET_SLUG)
+    }
+
     constructor(accountId: String) : this() {
+        this.accountId = accountId
         val jsonObject = WGlobalStorage.getAssetsAndActivityData(accountId) ?: return
         hiddenTokens = jsonArrayToArrayList(jsonObject.optJSONArray("alwaysHiddenSlugs"))
         visibleTokens = jsonArrayToArrayList(jsonObject.optJSONArray("alwaysShownSlugs"))
@@ -54,7 +60,7 @@ data class MAssetsAndActivityData(
     ): Array<MTokenBalance> {
         val tokensArray =
             ArrayList(
-                BalanceStore.getBalances(AccountStore.activeAccountId)?.mapNotNull { (key, _) ->
+                BalanceStore.getBalances(accountId)?.mapNotNull { (key, _) ->
                     TokenStore.getToken(key)
                 }?.filter { t ->
                     !deletedTokens.contains(t.slug)
@@ -76,7 +82,7 @@ data class MAssetsAndActivityData(
         val tokenBalances = tokensArray.map { token ->
             MTokenBalance.fromParameters(
                 token = token,
-                amount = BalanceStore.getBalances(AccountStore.activeAccountId)
+                amount = BalanceStore.getBalances(accountId)
                     ?.get(token.slug)
                     ?: BigInteger.valueOf(0)
             )!!
@@ -103,7 +109,7 @@ data class MAssetsAndActivityData(
         }.toMutableList()
 
         if (addVirtualStakingTokens) {
-            val stakingState = StakingStore.getStakingState(AccountStore.activeAccountId.orEmpty())
+            val stakingState = StakingStore.getStakingState(accountId)
             stakingState?.let { state ->
                 listOf(
                     USDE_SLUG to state.totalUSDeBalance,
@@ -127,7 +133,7 @@ data class MAssetsAndActivityData(
 
     fun isTokenRemovable(slug: String): Boolean {
         return addedTokens.contains(slug) &&
-            BalanceStore.getBalances(AccountStore.activeAccountId)?.contains(slug) != true &&
-            slug != TON_USDT_SLUG
+            BalanceStore.getBalances(accountId)?.contains(slug) != true &&
+            !NOT_REMOVABLE_TOKENS.contains(slug)
     }
 }

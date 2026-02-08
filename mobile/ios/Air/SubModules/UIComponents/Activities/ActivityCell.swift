@@ -3,7 +3,28 @@ import Kingfisher
 import UIKit
 import WalletContext
 import WalletCore
+import Perception
+import Dependencies
+import SwiftNavigation
 
+@Perceptible
+public class ActivityCellViewModel {
+    
+    @PerceptionIgnored
+    var activity: ApiActivity
+    
+    @PerceptionIgnored
+    var tokenStore: _TokenStore
+    @PerceptionIgnored
+    @AccountContext var account: MAccount
+    
+    init(accountId: String?, activity: ApiActivity) {
+        @Dependency(\.tokenStore) var tokenStore
+        self.tokenStore = tokenStore
+        self._account = AccountContext(accountId: accountId)
+        self.activity = activity
+    }
+}
 
 public class ActivityCell: WHighlightCell {
 
@@ -23,13 +44,9 @@ public class ActivityCell: WHighlightCell {
     static let regular14Font = UIFont.systemFont(ofSize: 14, weight: .regular)
     static let regular16Font = UIFont.systemFont(ofSize: 16, weight: .regular)
     static let medium16Font = UIFont.systemFont(ofSize: 16, weight: .medium)
-    static let rightArrowImage = UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold))!
-        .withRenderingMode(.alwaysTemplate)
     
     var skeletonView: ActivityCell.Skeleton? = nil
 
-    let dateFormatter = DateFormatter()
-    
     let mainView = UIView()
     let firstTwoRows: UIView = .init()
     
@@ -39,6 +56,12 @@ public class ActivityCell: WHighlightCell {
     let scamBadge: UIImageView = .init()
     
     let detailsLabel: UILabel = .init()
+    
+    private let rightChevron: UIImageView = {
+        let imageView = UIImageView(image: .airBundle("RightArrowIcon"))
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
     
     var amountContainer: WSensitiveData<UILabel> = .init(cols: 12, rows: 2, cellSize: 9, cornerRadius: 5, theme: .adaptive, alignment: .trailing)
     var amountLabel: UILabel!
@@ -56,6 +79,8 @@ public class ActivityCell: WHighlightCell {
     var commentViewConstraints: [NSLayoutConstraint] = []
     var commentViewLeadingConstraint: NSLayoutConstraint!
     var commentViewTrailingConstraint: NSLayoutConstraint!
+    private var firstTwoRowsTrailingConstraint: NSLayoutConstraint!
+    private var firstTwoRowsTrailingToChevronConstraint: NSLayoutConstraint!
 
     var nftAndCommentConstraint: NSLayoutConstraint!
     
@@ -63,6 +88,10 @@ public class ActivityCell: WHighlightCell {
     var activity: ApiActivity?
     var trackedValue: Double?
 
+    var viewModel: ActivityCellViewModel!
+    
+    var observeAccountAndActivity: ObserveToken?
+    
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         setupViews()
@@ -70,6 +99,12 @@ public class ActivityCell: WHighlightCell {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    public override func prepareForReuse() {
+        super.prepareForReuse()
+        contentView.alpha = 1
+        setShowsRightChevron(false)
     }
     
     @objc private func itemSelected() {
@@ -108,11 +143,20 @@ public class ActivityCell: WHighlightCell {
         firstTwoRows.accessibilityIdentifier = "firstTwoRows"
         firstTwoRows.translatesAutoresizingMaskIntoConstraints = false
         mainView.addSubview(firstTwoRows)
+        mainView.addSubview(rightChevron)
+        rightChevron.isHidden = true
+        
+        firstTwoRowsTrailingConstraint = firstTwoRows.trailingAnchor.constraint(equalTo: mainView.trailingAnchor)
+        firstTwoRowsTrailingToChevronConstraint = firstTwoRows.trailingAnchor.constraint(equalTo: rightChevron.leadingAnchor, constant: -10)
+        firstTwoRowsTrailingToChevronConstraint.isActive = false
         NSLayoutConstraint.activate([
             firstTwoRows.topAnchor.constraint(equalTo: mainView.topAnchor),
             firstTwoRows.bottomAnchor.constraint(equalTo: mainView.bottomAnchor).withPriority(.init(500)),
-            firstTwoRows.trailingAnchor.constraint(equalTo: mainView.trailingAnchor),
+            firstTwoRowsTrailingConstraint,
             firstTwoRows.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+            
+            rightChevron.trailingAnchor.constraint(equalTo: mainView.trailingAnchor),
+            rightChevron.centerYAnchor.constraint(equalTo: firstTwoRows.centerYAnchor),
         ])
 
         // MARK: address
@@ -240,11 +284,17 @@ public class ActivityCell: WHighlightCell {
         detailsLabel.textColor = WTheme.secondaryLabel
         amount2Label.textColor = WTheme.secondaryLabel
     }
+    
+    private func setShowsRightChevron(_ shows: Bool) {
+        rightChevron.isHidden = !shows
+        firstTwoRowsTrailingConstraint.isActive = !shows
+        firstTwoRowsTrailingToChevronConstraint.isActive = shows
+    }
 
     
     // MARK: - Configure
     
-    public func configure(with activity: ApiActivity, delegate: Delegate, shouldFadeOutSkeleton: Bool) {
+    public func configure(with activity: ApiActivity, accountContext: AccountContext, delegate: Delegate, shouldFadeOutSkeleton: Bool, showsRightChevron: Bool = false) {
         
         if shouldFadeOutSkeleton {
             skeletonView?.layer.maskedCorners = contentView.layer.maskedCorners
@@ -255,14 +305,17 @@ public class ActivityCell: WHighlightCell {
         }
         self.activity = activity
         self.delegate = delegate
+        setShowsRightChevron(showsRightChevron)
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
+        self.configureViewModel(accountId: accountContext.accountId, activity: activity)
         
         iconView.config(with: activity)
         
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        
         configureTitle(activity: activity)
-        configureDetails(activity: activity)
+        configureDetails(activity: activity, accountContext: accountContext)
         configureAmount(activity: activity)
         configureAmount2(activity: activity)
         configureSensitiveData(activity: activity)
@@ -279,12 +332,31 @@ public class ActivityCell: WHighlightCell {
         CATransaction.commit()
     }
     
+    func configureViewModel(accountId: String, activity: ApiActivity) {
+        if viewModel == nil {
+            viewModel = ActivityCellViewModel(accountId: accountId, activity: activity)
+            observeAccountAndActivity = observe { [weak self] in
+                guard let self else { return }
+                let activity = viewModel.activity
+                if let chain = getChainBySlug(activity.slug), let peerAddress = activity.peerAddress {
+                    _ = viewModel.$account.getLocalName(chain: chain, address: peerAddress)
+                }
+                configureDetails(activity: activity, accountContext: viewModel.$account)
+                configureAmount(activity: activity)
+                configureAmount2(activity: activity)
+            }
+        } else {
+            viewModel.$account.accountId = accountId
+            viewModel.activity = activity
+        }
+    }
+    
     public func updateToken() {
         if let activity {
             if (!amountIcon1.isHidden && amountIcon1.imageView.image == nil) || (!amountIcon2.isHidden && amountIcon2.imageView.image == nil) {
                 configureAmount(activity: activity)
             }
-            if !amount2Label.isHidden, case .transaction(let tx) = activity, let token = TokenStore.tokens[tx.slug], token.price != self.trackedValue {
+            if !amount2Label.isHidden, case .transaction(let tx) = activity, let token = viewModel.tokenStore[tx.slug], token.price != self.trackedValue {
                 configureAmount2(activity: activity)
             }
         }
@@ -294,7 +366,7 @@ public class ActivityCell: WHighlightCell {
         if isEmulation {
             titleLabel.text = activity.displayTitle.future
         } else {
-            titleLabel.text = activity.displayTitleResolved
+            titleLabel.text = activity.displayTitleResolvedOptimistic
         }
         
         if activity.isScamTransaction {
@@ -307,7 +379,7 @@ public class ActivityCell: WHighlightCell {
         }
     }
     
-    func configureDetails(activity: ApiActivity, isEmulation: Bool = false) {
+    func configureDetails(activity: ApiActivity, accountContext: AccountContext, isEmulation: Bool = false) {
         
         let attr = NSMutableAttributedString()
         
@@ -326,23 +398,24 @@ public class ActivityCell: WHighlightCell {
                 } else {
                     attr.append(NSAttributedString(string: lang("$transaction_to", arg1: "")))
                 }
-                if AccountStore.account?.isMultichain == true {
-                    let chain = activity.slug.starts(with: "ton") ? "ton" : "tron"
+                if accountContext.account.isMultichain, let chain = getChainBySlug(activity.slug) {
                     let image = NSTextAttachment(image: .airBundle("ActivityAddress-\(chain)"))
                     image.bounds = .init(x: 0, y: -1.5, width: 13, height: 13)
                     attr.append(NSAttributedString(attachment: image))
                 }
                 let address: String
-                if transaction.metadata?.name != nil {
-                    address = activity.addressToShow
+                let peerAddress = transaction.peerAddress
+                if let peerAddress, let chain = getChainBySlug(transaction.slug), let localName = viewModel.$account.getLocalName(chain: chain, address: peerAddress) {
+                    address = localName
+                } else if let name = transaction.metadata?.name {
+                    address = name
                 } else {
-                    let len = 4
-                    address = formatStartEndAddress(activity.addressToShow, prefix: len, suffix: len)
+                    address = formatStartEndAddress(peerAddress ?? "", prefix: 4, suffix: 4)
                 }
                 attr.append(NSAttributedString(string: address, attributes: [
                     .font: UIFont.systemFont(ofSize: 14, weight: .semibold)
                 ]))
-            } else if activity.shouldShowTransactionAnnualYield, let stakingState = StakingStore.currentAccount?.bySlug(activity.slug) {
+            } else if activity.shouldShowTransactionAnnualYield, let stakingState = accountContext.stakingData?.bySlug(activity.slug) {
                 if !attr.string.isEmpty {
                     attr.append(NSAttributedString(string: " · "))
                 }
@@ -366,7 +439,7 @@ public class ActivityCell: WHighlightCell {
                         status = lang("In Progress")
                     }
                 }
-            case .completed:
+            case .completed, .confirmed:
                 break
             case .failed:
                 status = lang("Failed swap")
@@ -394,12 +467,12 @@ public class ActivityCell: WHighlightCell {
 
         switch activity {
         case .transaction(let transaction):
-            if displayMode != .hide, let token = TokenStore.tokens[transaction.slug] {
+            if displayMode != .hide, let token = viewModel.tokenStore[transaction.slug] {
                 let amount = TokenAmount(transaction.amount, token)
                 let color: UIColor = transaction.type == .stake ? .air.textPurple : transaction.isIncoming ? WTheme.positiveAmount : WTheme.primaryLabel
                 let amountString = amount.formatAttributed(
                     format: .init(
-                        maxDecimals: amount.defaultDisplayDecimals,
+                        preset: .defaultAdaptive,
                         showPlus: displayMode == .noSign ? false : true,
                         showMinus: displayMode == .noSign ? false : true,
                         roundUp: false
@@ -424,18 +497,12 @@ public class ActivityCell: WHighlightCell {
                 let toAmount = swap.toAmount.value
                 let swapFailed = swap.status == .failed || swap.status == .expired
                 let swapInProgress = swap.status == .pending
-                let swapDone = swap.status == .completed
+                let swapDone = swap.status == .completed || swap.status == .confirmed
                 
                 let attr = NSMutableAttributedString()
                 
-                let from = formatAmountText(
-                    amount: fromAmount,
-                    currency: fromToken.symbol,
-                    negativeSign: false,
-                    positiveSign: false,
-                    decimalsCount: fromAmount < 0.0002 ? 6 : fromAmount < 0.02 ? 4 : fromAmount < 50 ? 2 : 0,
-                    forceCurrencyToRight: true
-                )
+                let fromDecimalAmount = DecimalAmount.fromDouble(fromAmount, fromToken)
+                let from = fromDecimalAmount.formatted(.compact, showMinus: false)
                 attr.append(NSAttributedString(string: from, attributes: [
                     .foregroundColor: swapFailed ? WTheme.error : WTheme.secondaryLabel,
                 ]))
@@ -452,14 +519,8 @@ public class ActivityCell: WHighlightCell {
                 }
                 attr.append(chevronString)
                 
-                let to = formatAmountText(
-                    amount: toAmount,
-                    currency: toToken.symbol,
-                    negativeSign: false,
-                    positiveSign: false,
-                    decimalsCount: toAmount < 0.0002 ? 6 : toAmount < 0.02 ? 4 : toAmount < 50 ? 2 : 0,
-                    forceCurrencyToRight: true
-                )
+                let toDecimalAmount = DecimalAmount.fromDouble(toAmount, toToken)
+                let to = toDecimalAmount.formatted(.compact, showMinus: false)
                 attr.append(NSAttributedString(string: to, attributes: [
                     .foregroundColor: swapFailed ? WTheme.error : swapInProgress ? WTheme.secondaryLabel : WTheme.positiveAmount,
                 ]))
@@ -497,14 +558,12 @@ public class ActivityCell: WHighlightCell {
         
         switch activity {
         case .transaction(let transaction):
-            if displayMode != .hide, let token = TokenStore.tokens[transaction.slug], let price = token.price, let baseCurrency = TokenStore.baseCurrency {
-                let amount: BaseCurrencyAmount = TokenAmount(transaction.amount, token).convertTo(baseCurrency, exchangeRate: price)
-                let doubleValue = amount.doubleValue
+            if displayMode != .hide, let token = viewModel.tokenStore[transaction.slug], let price = token.price {
+                let amount: BaseCurrencyAmount = TokenAmount(transaction.amount, token).convertTo(viewModel.tokenStore.baseCurrency, exchangeRate: price)
                 let color = WTheme.secondaryLabel
                 let amountString = amount.formatAttributed(
                     format: .init(
-                        maxDecimals: doubleValue < 0.0002 ? 6 : doubleValue < 0.02 ? 4 : doubleValue < 50 ? 2 : 0,
-                        showPlus: false,
+                        preset: .compact,
                         showMinus: false,
                         roundUp: false
                     ),
@@ -537,7 +596,7 @@ public class ActivityCell: WHighlightCell {
                 let exchangeAmount = TokenAmount.fromDouble(ex.price, ex.fromToken)
                 let exchangeRateString = exchangeAmount.formatAttributed(
                     format: .init(
-                        maxDecimals: ex.price < 0.001 ? 6 : ex.price < 0.1 ? 4 : ex.price < 50 ? 2 : 0,
+                        preset: .compact,
                         roundUp: false
                     ),
                     integerFont: .systemFont(ofSize: 14, weight: .semibold),
@@ -592,12 +651,13 @@ public class ActivityCell: WHighlightCell {
         
         let hasComment: Bool
         let shouldShowComment = activity?.shouldShowTransactionComment == true
+        let isIncoming = activity?.transaction?.isIncoming == true
         
-        if shouldShowComment, let commment = activity?.transaction?.comment?.nilIfEmpty {
-            commentView.setComment(commment)
+        if shouldShowComment, let tx = activity?.transaction, let commment = tx.comment?.nilIfEmpty {
+            commentView.setComment(commment, direction: isIncoming ? .incoming : .outgoing, isError: tx.status == .failed)
             hasComment = true
-        } else if shouldShowComment, activity?.transaction?.encryptedComment != nil {
-            commentView.setEncryptedComment()
+        } else if shouldShowComment, let tx = activity?.transaction, tx.encryptedComment != nil {
+            commentView.setEncryptedComment(direction: isIncoming ? .incoming : .outgoing, isError: tx.status == .failed)
             hasComment = true
         } else {
             hasComment = false
@@ -606,8 +666,6 @@ public class ActivityCell: WHighlightCell {
         commentView.isHidden = !hasComment
         if hasComment {
             NSLayoutConstraint.activate(commentViewConstraints)
-            let isIncoming = activity?.transaction?.isIncoming == true
-            commentView.setDirection(isIncoming ? .incoming : .outgoing)
             commentViewLeadingConstraint.isActive = isIncoming
             commentViewTrailingConstraint.isActive = !isIncoming
         } else {

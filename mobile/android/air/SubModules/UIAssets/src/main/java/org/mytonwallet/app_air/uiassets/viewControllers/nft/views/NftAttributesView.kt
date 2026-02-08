@@ -15,6 +15,7 @@ import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WThemedView
 import org.mytonwallet.app_air.uicomponents.widgets.WView
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
+import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletcore.moshi.ApiNft
@@ -102,7 +103,7 @@ class NftAttributesView(
             }
             addView(titleLabel)
             addView(valueLabel)
-            addView(separator, LayoutParams(LayoutParams.MATCH_PARENT, 1))
+            addView(separator, LayoutParams(MATCH_CONSTRAINT, 1.dp))
             addView(horizontalBarrier)
             rowViews.add(
                 RowView(
@@ -143,6 +144,8 @@ class NftAttributesView(
                 toEnd(rowView.valueLabel, 12f)
                 // Separator
                 topToTop(rowView.separator, rowView.horizontalBarrier, 10f)
+                toStart(rowView.separator)
+                toEnd(rowView.separator)
             }
             rowViews.lastOrNull()?.separator?.let { separator ->
                 separator.visibility = INVISIBLE

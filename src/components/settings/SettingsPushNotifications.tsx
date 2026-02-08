@@ -1,13 +1,12 @@
-import React, { memo } from '../../lib/teact/teact';
+import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { Account, AccountSettings, AccountType, GlobalState } from '../../global/types';
 
 import { MAX_PUSH_NOTIFICATIONS_ACCOUNT_COUNT } from '../../config';
 import { selectOrderedAccounts } from '../../global/selectors';
-import { getMainAccountAddress } from '../../util/account';
 import buildClassName from '../../util/buildClassName';
-import { isKeyCountGreater } from '../../util/isEmptyObject';
+import { getChainConfig } from '../../util/chain';
 
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
@@ -50,8 +49,9 @@ function SettingsPushNotifications({
   const lang = useLang();
 
   const { toggleNotifications, toggleNotificationAccount, toggleCanPlaySounds } = getActions();
-  const arePushNotificationsEnabled = Boolean(Object.keys(enabledAccounts).length);
+  const arePushNotificationsEnabled = enabledAccounts.length > 0;
   const headerTitle = arePushNotificationsAvailable ? lang('Notifications & Sounds') : lang('Sounds');
+  const enabledAccountsSet = useMemo(() => new Set(enabledAccounts), [enabledAccounts]);
 
   const handlePushNotificationsToggle = useLastCallback(() => {
     toggleNotifications({ isEnabled: !arePushNotificationsEnabled });
@@ -77,33 +77,35 @@ function SettingsPushNotifications({
     accountType: AccountType,
     title?: string,
   ) {
-    const onClick = !byChain.ton ? undefined : () => {
+    const hasSupportedChain = useMemo(() => {
+      return (Object.keys(byChain) as (keyof typeof byChain)[])
+        .some((chain) => getChainConfig(chain).doesSupportPushNotifications);
+    }, [byChain]);
+
+    const onClick = !hasSupportedChain ? undefined : () => {
       toggleNotificationAccount({ accountId });
     };
 
     const { cardBackgroundNft } = settingsByAccountId?.[accountId] || {};
-    const address = getMainAccountAddress(byChain) ?? '';
 
-    const isDisabled = enabledAccounts
-      && !enabledAccounts[accountId]
-      && isKeyCountGreater(enabledAccounts, MAX_PUSH_NOTIFICATIONS_ACCOUNT_COUNT - 1);
+    const isActive = enabledAccountsSet.has(accountId);
+    const isDisabled = !isActive && enabledAccounts.length >= MAX_PUSH_NOTIFICATIONS_ACCOUNT_COUNT;
 
     return (
       <AccountButton
         key={accountId}
         accountId={accountId}
-        address={address}
+        byChain={byChain}
         title={title}
         className={buildClassName(
           styles.account,
           isDisabled ? styles.accountDisabled : undefined,
         )}
         titleClassName={styles.pushAccountName}
-        ariaLabel={lang('Switch Account')}
         accountType={accountType}
         withCheckbox
         isLoading={isDisabled}
-        isActive={Boolean(enabledAccounts && enabledAccounts[accountId])}
+        isActive={isActive}
 
         onClick={onClick}
         cardBackgroundNft={cardBackgroundNft}

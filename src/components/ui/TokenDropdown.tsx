@@ -3,6 +3,7 @@ import React, { memo, useMemo } from '../../lib/teact/teact';
 import type { ApiTokenWithPrice } from '../../api/types';
 
 import getChainNetworkIcon from '../../util/swap/getChainNetworkIcon';
+import { getIsNativeToken } from '../../util/tokens';
 import { ASSET_LOGO_PATHS } from './helpers/assetLogos';
 
 import useLang from '../../hooks/useLang';
@@ -26,6 +27,7 @@ interface OwnProps<T extends TokenWithId> {
   isMultichainAccount?: boolean;
   theme?: 'purple';
   isInMode?: boolean;
+  isDisabled?: boolean;
   /** `id` is the token slug, unless an `id` property is specified explicitly in the `allTokens` items */
   onChange?: (id: string, token: T) => void;
 }
@@ -38,6 +40,7 @@ function TokenDropdown<T extends TokenWithId>({
   isMultichainAccount,
   theme,
   isInMode,
+  isDisabled,
   onChange,
 }: OwnProps<T>) {
   const lang = useLang();
@@ -87,6 +90,7 @@ function TokenDropdown<T extends TokenWithId>({
       buttonPrefix={buttonPrefix}
       className={styles.dropdown}
       menuClassName={theme && styles[theme]}
+      disabled={isDisabled}
       onChange={handleChange}
     />
   );
@@ -103,7 +107,7 @@ export function tokenToDropdownItem(token: TokenWithId, isMultichainAccount?: bo
     value: getTokenId(token),
     icon: ASSET_LOGO_PATHS[token.symbol.toLowerCase() as keyof typeof ASSET_LOGO_PATHS]
       || token.image,
-    overlayIcon: isMultichainAccount ? getChainNetworkIcon(token.chain) : undefined,
+    overlayIcon: isMultichainAccount && !getIsNativeToken(token.slug) ? getChainNetworkIcon(token.chain) : undefined,
     name: token.symbol,
   };
 }

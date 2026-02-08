@@ -1,7 +1,6 @@
 
 import SwiftUI
 import UIKit
-import UIPasscode
 import UIComponents
 import WalletCore
 import WalletContext
@@ -9,10 +8,8 @@ import WalletContext
 
 struct DappSendTransactionDetailView: View {
     
+    var accountContext: AccountContext
     var message: ApiDappTransfer
-    var onScroll: (CGFloat) -> ()
-    
-    @Namespace var ns
     
     var isScam: Bool { message.isScam == true }
     
@@ -27,7 +24,7 @@ struct DappSendTransactionDetailView: View {
             
             InsetSection {
                 InsetCell {
-                    TappableAddressFull(address: message.toAddress)
+                    TappableAddressFull(accountContext: accountContext, chain: "ton", address: message.toAddress)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 3)
@@ -36,7 +33,6 @@ struct DappSendTransactionDetailView: View {
             } header: {
                 Text(lang("Receiving address"))
             }
-            .scrollPosition(ns: ns, offset: isScam ? 32 : 0, callback: onScroll)
 
             InsetSection {
                 TransactionAmountRow(transfer: message)
@@ -62,7 +58,7 @@ struct DappSendTransactionDetailView: View {
                 InsetSection {
                     InsetExpandableCell(content: stateInit)
                 } header: {
-                    Text(lang("StateInit"))
+                    Text("StateInit")
                 }
             }
             
@@ -72,7 +68,6 @@ struct DappSendTransactionDetailView: View {
                     .padding(.top, 8)
             }
         }
-        .coordinateSpace(name: ns)
-        .navigationBarInset(68)
+        .navigationBarInset(12)
     }
 }

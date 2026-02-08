@@ -7,12 +7,15 @@ import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
-import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
+import org.mytonwallet.app_air.uicomponents.extensions.atMost
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import org.mytonwallet.app_air.uicomponents.extensions.exactly
+import org.mytonwallet.app_air.uicomponents.extensions.unspecified
 import org.mytonwallet.app_air.uicomponents.image.Content
 import org.mytonwallet.app_air.uicomponents.image.WCustomImageView
+import org.mytonwallet.app_air.uicomponents.widgets.WFrameLayout
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WProtectedView
 import org.mytonwallet.app_air.uicomponents.widgets.WThemedView
@@ -22,6 +25,7 @@ import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletbasecontext.utils.ApplicationContextHolder
 import org.mytonwallet.app_air.walletbasecontext.utils.toString
 import org.mytonwallet.app_air.walletcontext.utils.VerticalImageSpan
 import org.mytonwallet.app_air.walletcore.moshi.ApiSwapStatus
@@ -32,11 +36,11 @@ import java.math.BigInteger
 import kotlin.math.abs
 import kotlin.math.max
 
-class ActivityAmountView(context: Context) : FrameLayout(context), WThemedView, WProtectedView {
+class ActivityAmountView(context: Context) : WFrameLayout(context), WThemedView, WProtectedView {
 
     private val amountLabel = WSensitiveDataContainer(
         WLabel(context).apply {
-            setStyle(16f)
+            setStyle(ApplicationContextHolder.adaptiveFontSize)
             setSingleLine()
             ellipsize = TextUtils.TruncateAt.MARQUEE
             isSelected = true
@@ -55,7 +59,6 @@ class ActivityAmountView(context: Context) : FrameLayout(context), WThemedView, 
     private val secondIconView = WCustomImageView(context)
 
     init {
-        id = generateViewId()
         addView(amountLabel)
         addView(mainIconView)
         addView(borderView)
@@ -76,13 +79,13 @@ class ActivityAmountView(context: Context) : FrameLayout(context), WThemedView, 
 
     fun configure(transaction: MApiTransaction.Transaction) {
         val amountCols =
-            if (transaction.isNft || transaction.type?.noAmountTransaction == true) 0 else 4 + abs(
+            if (transaction.isNft || transaction.noAmountTransaction) 0 else 4 + abs(
                 transaction.id.hashCode() % 8
             )
         amountLabel.setMaskCols(amountCols)
 
         val token = transaction.token
-        if (token == null || transaction.isNft || transaction.type?.noAmountTransaction == true) {
+        if (token == null || transaction.isNft || transaction.noAmountTransaction) {
             amountLabel.contentView.text = ""
             mainIconView.clear()
             secondIconView.clear()
@@ -110,12 +113,11 @@ class ActivityAmountView(context: Context) : FrameLayout(context), WThemedView, 
                 else -> WColor.PrimaryText.color
             }
         )
-        mainIconView.set(Content.of(token, showChainConfig = Content.SHOW_CHAIN_NEVER))
+        mainIconView.set(Content.of(token, showChain = false))
         secondIconView.visibility = GONE
         borderView.visibility = GONE
 
         requestLayout()
-        updateTheme()
     }
 
     fun configure(swap: MApiTransaction.Swap) {
@@ -132,10 +134,10 @@ class ActivityAmountView(context: Context) : FrameLayout(context), WThemedView, 
         }
         val isFailed = swap.status == ApiSwapStatus.EXPIRED || swap.status == ApiSwapStatus.FAILED
 
-        mainIconView.set(Content.of(fromToken, showChainConfig = Content.SHOW_CHAIN_NEVER))
+        mainIconView.set(Content.of(fromToken, showChain = false))
         borderView.visibility = VISIBLE
         secondIconView.visibility = VISIBLE
-        secondIconView.set(Content.of(toToken, showChainConfig = Content.SHOW_CHAIN_NEVER))
+        secondIconView.set(Content.of(toToken, showChain = false))
         updateViewOrder()
 
         val builder = SpannableStringBuilder()
@@ -250,20 +252,9 @@ class ActivityAmountView(context: Context) : FrameLayout(context), WThemedView, 
 
         val maxAmountLabelWidth = totalAvailableWidth - reservedWidth
 
-        amountLabel.measure(
-            MeasureSpec.makeMeasureSpec(maxAmountLabelWidth, MeasureSpec.AT_MOST),
-            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-        )
-
-        mainIconView.measure(
-            MeasureSpec.makeMeasureSpec(iconWidth, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(iconWidth, MeasureSpec.EXACTLY)
-        )
-
-        secondIconView.measure(
-            MeasureSpec.makeMeasureSpec(iconWidth, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(iconWidth, MeasureSpec.EXACTLY)
-        )
+        amountLabel.measure(maxAmountLabelWidth.atMost, 0.unspecified)
+        mainIconView.measure(iconWidth.exactly, iconWidth.exactly)
+        secondIconView.measure(iconWidth.exactly, iconWidth.exactly)
 
         val totalWidth = paddingLeft + amountLabel.measuredWidth + spacingBetweenViews +
             mainIconView.measuredWidth + paddingRight + secondIconOffset

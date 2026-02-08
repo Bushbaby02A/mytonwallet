@@ -13,10 +13,10 @@ import {
   APP_VERSION,
   IS_CAPACITOR,
   IS_CORE_WALLET,
+  IS_EXPLORER,
   IS_EXTENSION,
   LANG_LIST,
   MTW_CARDS_WEBSITE,
-  MTW_TIPS_CHANNEL_NAME,
   PROXY_HOSTS,
   SHOULD_SHOW_ALL_ASSETS_AND_ACTIVITY,
   SUPPORT_USERNAME,
@@ -25,6 +25,7 @@ import {
 } from '../../config';
 import { getHelpCenterUrl } from '../../global/helpers/getHelpCenterUrl';
 import {
+  selectCurrentAccountId,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
   selectIsCurrentAccountViewMode,
@@ -40,6 +41,7 @@ import { openUrl } from '../../util/openUrl';
 import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
 import { captureControlledSwipe } from '../../util/swipeController';
 import useTelegramMiniAppSwipeToClose from '../../util/telegram/hooks/useTelegramMiniAppSwipeToClose';
+import { getTelegramChannelUrl } from '../../util/url';
 import {
   IS_BIOMETRIC_AUTH_SUPPORTED,
   IS_DAPP_SUPPORTED,
@@ -579,7 +581,7 @@ function Settings({
             )}
           </div>
 
-          {(!!versions?.length || IS_LEDGER_SUPPORTED) && (
+          {!IS_EXPLORER && (!!versions?.length || IS_LEDGER_SUPPORTED) && (
             <div className={styles.block}>
               {!!versions?.length && (
                 <div className={styles.item} onClick={handleOpenWalletVersion}>
@@ -622,7 +624,7 @@ function Settings({
               )}
               <div className={styles.block}>
                 <a
-                  href={`https://t.me/${MTW_TIPS_CHANNEL_NAME[langCode] ?? MTW_TIPS_CHANNEL_NAME.en}`}
+                  href={getTelegramChannelUrl(langCode)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={styles.item}
@@ -724,7 +726,7 @@ function Settings({
             </div>
           </div>
 
-          <div className={styles.version} onClick={handleMultipleClick}>
+          <div className={styles.version} onClick={IS_EXPLORER ? undefined : handleMultipleClick}>
             {APP_NAME} {APP_VERSION} {APP_ENV_MARKER}
           </div>
         </div>
@@ -884,13 +886,15 @@ function Settings({
       >
         {renderContent}
       </Transition>
-      <SettingsDeveloperOptions
-        isOpen={isDeveloperModalOpen}
-        isTestnet={isTestnet}
-        isCopyStorageEnabled={isCopyStorageEnabled}
-        onShowAllWalletVersions={handleShowAllWalletVersions}
-        onClose={handlCloseDeveloperModal}
-      />
+      {!IS_EXPLORER && (
+        <SettingsDeveloperOptions
+          isOpen={isDeveloperModalOpen}
+          isTestnet={isTestnet}
+          isCopyStorageEnabled={isCopyStorageEnabled}
+          onShowAllWalletVersions={handleShowAllWalletVersions}
+          onClose={handlCloseDeveloperModal}
+        />
+      )}
       <LogOutModal isOpen={isLogOutModalOpened} onClose={handleCloseLogOutModal} />
       {IS_BIOMETRIC_AUTH_SUPPORTED && <Biometrics isInsideModal={isInsideModal} />}
     </div>
@@ -902,7 +906,8 @@ export default memo(withGlobal<OwnProps>((global): StateProps => {
   const { isCopyStorageEnabled, supportAccountsCount = 1, isNftBuyingDisabled } = global.restrictions;
 
   const { currentVersion, byId: versionsById } = global.walletVersions ?? {};
-  const versions = versionsById?.[global.currentAccountId!];
+  const currentAccountId = selectCurrentAccountId(global);
+  const versions = versionsById?.[currentAccountId!];
   const { dapps = MEMO_EMPTY_ARRAY } = selectCurrentAccountState(global) || {};
 
   return {

@@ -8,7 +8,7 @@ import { vibrate } from '../../../../../util/haptics';
 import useContextMenuHandlers from '../../../../../hooks/useContextMenuHandlers';
 import useLastCallback from '../../../../../hooks/useLastCallback';
 
-export type MenuHandler = 'reorder' | 'rename' | 'customize' | 'logOut';
+export type MenuHandler = 'reorder' | 'rename' | 'customize' | 'remove';
 
 const items: DropdownItem<MenuHandler>[] = [{
   name: 'Reorder',
@@ -23,13 +23,11 @@ const items: DropdownItem<MenuHandler>[] = [{
   fontIcon: 'menu-magic',
   value: 'customize',
 }, {
-  name: 'Log Out',
+  name: 'Remove',
   fontIcon: 'menu-trash',
-  value: 'logOut',
+  value: 'remove',
   isDangerous: true,
 }];
-
-export const OPEN_CONTEXT_MENU_CLASS_NAME = 'open-context-menu';
 
 function useAccountContextMenu(ref: ElementRef<HTMLElement>, options: {
   isPortrait?: boolean;
@@ -37,7 +35,7 @@ function useAccountContextMenu(ref: ElementRef<HTMLElement>, options: {
   accountId: string;
   onReorderClick: NoneToVoidFunction;
   onRenameClick: NoneToVoidFunction;
-  onLogOutClick: NoneToVoidFunction;
+  onRemoveClick: NoneToVoidFunction;
 }) {
   const {
     openCustomizeWalletModal,
@@ -51,7 +49,7 @@ function useAccountContextMenu(ref: ElementRef<HTMLElement>, options: {
     accountId,
     onReorderClick,
     onRenameClick,
-    onLogOutClick,
+    onRemoveClick,
   } = options;
 
   const {
@@ -83,8 +81,8 @@ function useAccountContextMenu(ref: ElementRef<HTMLElement>, options: {
         openCustomizeWalletModal({ returnTo: 'accountSelector' });
         break;
 
-      case 'logOut':
-        onLogOutClick();
+      case 'remove':
+        onRemoveClick();
         break;
     }
 

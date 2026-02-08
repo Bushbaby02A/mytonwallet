@@ -5,6 +5,8 @@ import WalletCore
 import WalletContext
 import UIComponents
 
+private let featuredDappCornerRadius: CGFloat = IOS_26_MODE_ENABLED ? 22 : 14
+
 struct FeaturedDappCell: View {
     
     var item: ApiSite
@@ -32,113 +34,89 @@ struct FeaturedDappCell: View {
                     .zIndex(-1)
             }
         }
-        .frame(height: 220, alignment: .top)
+        .frame(height: 190, alignment: .top)
         .overlay(alignment: .bottom) {
             overlayContent
         }
-//        .border(Color.red, width: 4)
         .contentShape(.containerRelative)
         .highlightOverlay(isHighlighted)
         .clipShape(.containerRelative)
-        .containerShape(.rect(cornerRadius: S.featuredDappCornerRadius))
+        .containerShape(.rect(cornerRadius: featuredDappCornerRadius))
+        .overlay {
+            if item.withBorder == true {
+                RoundedRectangle(cornerRadius: featuredDappCornerRadius)
+                    .stroke(badgeShapeStyle, lineWidth: 2)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if let badgeText = item.badgeText, !badgeText.isEmpty {
+                Text(badgeText)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .frame(minHeight: 18)
+                    .background(badgeShapeStyle, in: .rect(cornerRadius: 6))
+                    .padding(.top, -6)
+                    .padding(.trailing, 20)
+            }
+        }
+    }
+    
+    private var badgeShapeStyle: AnyShapeStyle {
+        guard let colors = item.borderColor, !colors.isEmpty else {
+            return AnyShapeStyle(.tint)
+        }
+        let mappedColors = colors.map { Color(UIColor(hex: $0)) }
+        let gradientColors = mappedColors.count == 1 ? [mappedColors[0], mappedColors[0]] : mappedColors
+        return AnyShapeStyle(LinearGradient(colors: gradientColors, startPoint: .trailing, endPoint: .leading))
     }
     
     @ViewBuilder
     var overlayContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-//            titleLabels
             openSection
         }
         .environment(\.colorScheme, .light)
     }
     
     @ViewBuilder
-    var titleLabels: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let kicker = item.test_kicker {
-                Text(kicker)
-                    .textCase(.uppercase)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Material.thin)
-            }
-            Text(item.test_shortTitle)
-                .font(.system(size: 29, weight: .bold))
-                .foregroundStyle(.white)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-    }
-    
-    @ViewBuilder
     var openSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 0) {
-                KFImage(URL(string: item.icon))
-                    .resizable()
-                    .loadDiskFileSynchronously(false)
-                    .aspectRatio(1, contentMode: .fill)
-                    .frame(width: 48, height: 48)
-                    .clipShape(.rect(cornerRadius: 11))
-                    .padding(.trailing, 10)
+                if false {
+                    KFImage(URL(string: item.icon))
+                        .resizable()
+                        .loadDiskFileSynchronously(false)
+                        .aspectRatio(1, contentMode: .fill)
+                        .frame(width: 48, height: 48)
+                        .clipShape(.rect(cornerRadius: 11))
+                        .padding(.trailing, 10)
+                }
                 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(item.name)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(item.name)
+                            .lineLimit(2)
+                        if item.isVerified == true {
+                            Image(systemName: "checkmark.seal.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
                     Text(item.description)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(Material.thin)
                         .lineLimit(2)
                 }
-                .padding(.trailing, 8)
-                
-                Spacer(minLength: 0)
-                
-                Button(action: openAction) {
-                    Text(lang("Open"))
-                }
-                .buttonStyle(OpenButtonStyle())
             }
                 
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background {
-            Rectangle()
-                .fill(Material.thin)
-                .environment(\.colorScheme, .dark)
-        }
-    }
-}
-
-fileprivate struct OpenButtonStyle: PrimitiveButtonStyle {
-    @State private var isHighlighted: Bool = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .opacity(isHighlighted ? 0.5 : 1)
-            .foregroundStyle(Color(WTheme.tint))
-            .background(.white.opacity(0.5).blendMode(.overlay), in: .containerRelative)
-            .contentShape(.containerRelative.inset(by: -10))
-            .onTapGesture {
-                configuration.trigger()
-            }
-            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
-                withAnimation(.spring(duration: 0.1)) {
-                    isHighlighted = true
-                }
-            }.onEnded { _ in
-                withAnimation(.spring(duration: 0.5)) {
-                    isHighlighted = false
-                }
-            })
-            .containerShape(.capsule)
     }
 }
 

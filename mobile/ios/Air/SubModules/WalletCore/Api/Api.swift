@@ -14,9 +14,9 @@ public class Api {
     // shared core api and bridge
     static var shared: Api? = nil
     
-    static var bridge: JSWebViewBridge  {
+    public static var bridge: JSWebViewBridge  {
         get throws {
-            try Api.shared.orThrow().webViewBridge
+            try Api.shared.orThrow("bridge not ready").webViewBridge
         }
     }
     

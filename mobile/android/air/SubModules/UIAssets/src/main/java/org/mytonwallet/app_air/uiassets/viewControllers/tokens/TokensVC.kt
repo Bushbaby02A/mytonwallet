@@ -2,13 +2,19 @@ package org.mytonwallet.app_air.uiassets.viewControllers.tokens
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.mytonwallet.app_air.uiassets.viewControllers.assetsTab.AssetsTabVC
 import org.mytonwallet.app_air.uiassets.viewControllers.token.TokenVC
 import org.mytonwallet.app_air.uiassets.viewControllers.tokens.cells.TokenCell
@@ -23,11 +29,16 @@ import org.mytonwallet.app_air.uicomponents.widgets.WCell
 import org.mytonwallet.app_air.uicomponents.widgets.WRecyclerView
 import org.mytonwallet.app_air.uistake.earn.EarnRootVC
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
+import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
 import org.mytonwallet.app_air.walletcontext.utils.IndexPath
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
+import org.mytonwallet.app_air.walletcore.models.MAccount
+import org.mytonwallet.app_air.walletcore.models.MAssetsAndActivityData
+import org.mytonwallet.app_air.walletcore.models.MScreenMode
 import org.mytonwallet.app_air.walletcore.models.MTokenBalance
 import org.mytonwallet.app_air.walletcore.stores.AccountStore
 import org.mytonwallet.app_air.walletcore.stores.TokenStore
@@ -37,11 +48,29 @@ import java.util.concurrent.Executors
 @SuppressLint("ViewConstructor")
 class TokensVC(
     context: Context,
+    private var showingAccountId: String,
     private val mode: Mode,
     private val onHeightChanged: (() -> Unit)? = null,
+    private val onAssetsShown: (() -> Unit)? = null,
     private val onScroll: ((rv: RecyclerView) -> Unit)? = null
 ) : WViewController(context),
     WRecyclerViewAdapter.WRecyclerViewDataSource, WalletCore.EventObserver {
+    override val TAG = "Tokens"
+
+    private var isShowingAccountMultichain = WGlobalStorage.isMultichain(showingAccountId)
+    private var _showingAccount: MAccount? = null
+    private fun fetchAccount(accountId: String): MAccount {
+        _showingAccount?.let {
+            if (it.accountId == accountId)
+                return it
+        }
+        val activeAccount = AccountStore.activeAccount
+        _showingAccount = if (activeAccount?.accountId == accountId)
+            activeAccount
+        else
+            AccountStore.accountById(accountId)
+        return _showingAccount!!
+    }
 
     enum class Mode {
         HOME,
@@ -63,12 +92,18 @@ class TokensVC(
 
     override val isSwipeBackAllowed = false
 
+    private val queueDispatcher =
+        Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    private val scope = CoroutineScope(SupervisorJob() + queueDispatcher)
+
     private var walletTokens: Array<MTokenBalance> = emptyArray()
 
     private var thereAreMoreToShow: Boolean = false
 
     private val rvAdapter =
-        WRecyclerViewAdapter(WeakReference(this), arrayOf(TOKEN_CELL))
+        WRecyclerViewAdapter(WeakReference(this), arrayOf(TOKEN_CELL)).apply {
+            setHasStableIds(true)
+        }
 
     private val scrollListener = object : RecyclerView.OnScrollListener() {
         override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
@@ -118,11 +153,20 @@ class TokensVC(
 
     private val showAllView: ShowAllView by lazy {
         val v = ShowAllView(context)
-        v.titleLabel.text = LocaleController.getString("Show All Assets")
+        v.configure(
+            icon = org.mytonwallet.app_air.uiassets.R.drawable.ic_show_assets,
+            text = LocaleController.getString("Show All Assets")
+        )
         v.onTap = {
             val window = this.window!!
             val navVC = WNavigationController(window)
-            navVC.setRoot(AssetsTabVC(context, defaultSelectedIdentifier = AssetsTabVC.TAB_COINS))
+            navVC.setRoot(
+                AssetsTabVC(
+                    context,
+                    showingAccountId = showingAccountId,
+                    defaultSelectedIdentifier = AssetsTabVC.TAB_COINS
+                )
+            )
             window.present(navVC)
         }
         v.visibility = View.GONE
@@ -139,7 +183,7 @@ class TokensVC(
         view.setConstraints {
             allEdges(recyclerView)
             if (mode == Mode.HOME) {
-                toTop(showAllView, 320f)
+                toTop(showAllView, 300f)
                 toCenterX(showAllView)
             }
         }
@@ -148,13 +192,19 @@ class TokensVC(
             recyclerView.disallowInterceptOnOverscroll()
 
         WalletCore.registerObserver(this)
-        dataUpdated()
+        dataUpdated(forceUpdate = false)
 
         updateTheme()
     }
 
+    private var _isDarkThemeApplied: Boolean? = null
     override fun updateTheme() {
         super.updateTheme()
+
+        val darkModeChanged = ThemeManager.isDark != _isDarkThemeApplied
+        if (!darkModeChanged)
+            return
+        _isDarkThemeApplied = ThemeManager.isDark
 
         if (mode == Mode.HOME) {
             view.background = null
@@ -164,16 +214,46 @@ class TokensVC(
         rvAdapter.reloadData()
     }
 
+    fun configure(accountId: String) {
+        if (showingAccountId == accountId)
+            return
+        scope.coroutineContext.cancelChildren()
+        walletTokens = emptyArray()
+        rvAdapter.reloadData()
+        prevSize = -1
+        showingAccountId = accountId
+        isShowingAccountMultichain = WGlobalStorage.isMultichain(accountId)
+        dataUpdated(forceUpdate = true)
+    }
+
     var prevSize = -1
-    private fun dataUpdated() {
-        Executors.newSingleThreadExecutor().execute {
-            val allWalletTokens =
-                AccountStore.assetsAndActivityData.getAllTokens(addVirtualStakingTokens = true)
+    private fun dataUpdated(forceUpdate: Boolean) {
+        scope.launch {
+            val accountId = showingAccountId
+            val showingAccount = fetchAccount(accountId)
+            val isSingleWalletActive =
+                MScreenMode.SingleWallet(accountId).isScreenActive
+
+            if (!forceUpdate && !isSingleWalletActive) return@launch
+
+            val cachedAssetsAndActivityData = AccountStore.assetsAndActivityData
+            val assetsAndActivityData = if (cachedAssetsAndActivityData.accountId == accountId) {
+                cachedAssetsAndActivityData
+            } else {
+                MAssetsAndActivityData(accountId)
+            }
+            val allWalletTokens: Array<MTokenBalance> = assetsAndActivityData.getAllTokens(
+                addVirtualStakingTokens = true
+            )
+
             val filteredWalletTokens = allWalletTokens.filter {
                 val token = TokenStore.getToken(it.token)
-                it.isVirtualStakingRow || token?.isHidden() != true
+                it.isVirtualStakingRow || token?.isHidden(
+                    showingAccount,
+                    assetsAndActivityData
+                ) != true
             }
-            Handler(Looper.getMainLooper()).post {
+            withContext(Dispatchers.Main) {
                 walletTokens = if (mode == Mode.HOME) filteredWalletTokens.take(5)
                     .toTypedArray() else filteredWalletTokens.toTypedArray()
                 thereAreMoreToShow = filteredWalletTokens.size > 5
@@ -183,13 +263,14 @@ class TokensVC(
                     onHeightChanged?.invoke()
                 }
                 rvAdapter.reloadData()
+                onAssetsShown?.invoke()
             }
         }
     }
 
     val calculatedHeight: Int
         get() {
-            return (64 * walletTokens.size).dp + (if (thereAreMoreToShow) 56 else 0).dp
+            return (60 * walletTokens.size).dp + (if (thereAreMoreToShow) 56 else 0).dp
         }
 
     override fun onWalletEvent(walletEvent: WalletEvent) {
@@ -200,7 +281,7 @@ class TokensVC(
             is WalletEvent.AccountChanged,
             WalletEvent.StakingDataUpdated,
             WalletEvent.BaseCurrencyChanged -> {
-                dataUpdated()
+                dataUpdated(forceUpdate = false)
             }
 
             else -> {}
@@ -232,7 +313,8 @@ class TokensVC(
                             window?.present(navVC)
                             return@let
                         }
-                        val tokenVC = TokenVC(context, it)
+                        val account = AccountStore.activeAccount ?: return@let
+                        val tokenVC = TokenVC(context, account, it)
                         navigationController?.push(tokenVC)
                     }
                 }
@@ -251,13 +333,25 @@ class TokensVC(
         indexPath: IndexPath
     ) {
         (cellHolder.cell as TokenCell).configure(
+            showingAccountId,
+            isShowingAccountMultichain,
             walletTokens[indexPath.row],
-            isLast = indexPath.row == walletTokens.size - 1
+            isFirst = mode == Mode.ALL && indexPath.row == 0,
+            isLast = indexPath.row == walletTokens.size - 1 && !thereAreMoreToShow
         )
+    }
+
+    override fun recyclerViewCellItemId(rv: RecyclerView, indexPath: IndexPath): String? {
+        return walletTokens.getOrNull(indexPath.row)?.let {
+            "${it.isVirtualStakingRow}_${it.token}"
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        scope.cancel()
+        queueDispatcher.close()
+        WalletCore.unregisterObserver(this)
         recyclerView.onDestroy()
         recyclerView.adapter = null
         recyclerView.removeAllViews()

@@ -21,6 +21,8 @@ import org.mytonwallet.app_air.uicomponents.base.showAlert
 import org.mytonwallet.app_air.uicomponents.commonViews.WordListView
 import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
+import org.mytonwallet.app_air.uicomponents.helpers.HapticType
+import org.mytonwallet.app_air.uicomponents.helpers.Haptics
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.helpers.spans.WTypefaceSpan
 import org.mytonwallet.app_air.uicomponents.helpers.typeface
@@ -38,13 +40,19 @@ import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletbasecontext.utils.toProcessedSpannableStringBuilder
 import org.mytonwallet.app_air.walletcontext.WalletContextManager
 import org.mytonwallet.app_air.walletcontext.helpers.WordCheckMode
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcontext.utils.colorWithAlpha
 import java.lang.ref.WeakReference
 import kotlin.random.Random
 
 @SuppressLint("ViewConstructor")
-open class RecoveryPhraseVC(context: Context, private val words: Array<String>) :
+open class RecoveryPhraseVC(
+    context: Context,
+    private val network: MBlockchainNetwork,
+    private val words: Array<String>
+) :
     WViewController(context) {
+    override val TAG = "RecoveryPhrase"
 
     override val protectFromScreenRecord = true
     override val shouldDisplayBottomBar = true
@@ -66,7 +74,7 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
     }
 
     private val subtitleLabel = WLabel(context).apply {
-        setStyle(17f, WFont.SemiBold)
+        setStyle(17f, WFont.Regular)
         setLineHeight(TypedValue.COMPLEX_UNIT_SP, 26f)
         text =
             LocaleController.getString("\$mnemonic_list_description")
@@ -76,7 +84,7 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
     }
 
     private val warningLabel = WLabel(context).apply {
-        setStyle(17f, WFont.SemiBold)
+        setStyle(17f, WFont.Medium)
         setLineHeight(TypedValue.COMPLEX_UNIT_SP, 26f)
         text =
             LocaleController.getString("\$mnemonic_warning").trim()
@@ -86,14 +94,11 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
         setTextColor(WColor.Red)
     }
 
-    private fun warningText(relatedTo: String): SpannableStringBuilder {
+    private fun warningText(key: String): SpannableStringBuilder {
         return SpannableStringBuilder().apply {
             append(
-                LocaleController.getFormattedString(
-                    "\$secret_words_warning", listOf(
-                        relatedTo
-                    )
-                ).toProcessedSpannableStringBuilder()
+                LocaleController.getString(key)
+                    .toProcessedSpannableStringBuilder()
             )
             append("\n\n")
             val redWarningStart = length
@@ -115,16 +120,18 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
         gravity = Gravity.CENTER
         setPadding(16.dp, 0, 16.dp, 0)
         setTextColor(WColor.Tint)
+        isTinted = true
         setOnClickListener {
             showAlert(
                 title = LocaleController.getString("Security Warning"),
-                text = warningText(LocaleController.getString("clipboard")),
+                text = warningText("\$copy_mnemonic_warning"),
                 button = LocaleController.getString("Copy Anyway"),
                 buttonPressed = {
                     val clipboard =
                         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val clip = ClipData.newPlainText("Wallet Address", words.joinToString(" "))
                     clipboard.setPrimaryClip(clip)
+                    Haptics.play(context, HapticType.LIGHT_TAP)
                     Toast.makeText(
                         context,
                         LocaleController.getString("Secret phrase was copied to clipboard"),
@@ -183,7 +190,7 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
             topToBottom(subtitleLabel, animationView, 37f)
             toCenterX(subtitleLabel, 44f)
             topToBottom(warningLabel, subtitleLabel, 23f)
-            toCenterX(warningLabel, 48f)
+            toCenterX(warningLabel, 24f)
             topToBottom(copyToClipboardButton, warningLabel, 34f)
             toCenterX(copyToClipboardButton, 48f)
             topToBottom(wordsView, copyToClipboardButton, 46f)
@@ -216,17 +223,12 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
     override fun setupViews() {
         super.setupViews()
 
-        if (wordsCount == 24) {
-            // This standard case has much better localization support
-            setNavTitle(LocaleController.getString("24 Secret Words"))
-        } else {
-            setNavTitle(
-                LocaleController.getFormattedString(
-                    "%1\$d Secret Words",
-                    listOf(wordsCount.toString())
-                )
-            )
-        }
+        setNavTitle(
+            LocaleController.getPluralOrFormat(
+                "%1\$d Secret Words",
+                wordsCount,
+            ) + network.localizedIdentifier
+        )
         setupNavBar(true)
         setTopBlur(visible = false, animated = false)
 
@@ -261,6 +263,7 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
 
         push(
             WalletContextManager.delegate?.getWordCheckVC(
+                network,
                 words,
                 randomNumbers.sorted(),
                 checkMode
@@ -276,7 +279,7 @@ open class RecoveryPhraseVC(context: Context, private val words: Array<String>) 
         view.post {
             showAlert(
                 title = LocaleController.getString("Security Warning"),
-                text = warningText(LocaleController.getString("screenshot")),
+                text = warningText("\$screenshot_mnemonic_warning"),
                 button = LocaleController.getString("See Words"),
             )
         }

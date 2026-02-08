@@ -19,7 +19,7 @@ public let IOS_26_MODE_ENABLED: Bool = {
 }()
 
 @MainActor
-public func congigureIOS26Compativility() {
+public func configureIOS26Compatibility() {
     if IOS_26_MODE_ENABLED {
         installSheetLayoutTransformReset()
     }
@@ -78,12 +78,21 @@ public enum S {
         IOS_26_MODE_ENABLED ? 26 : 12
     }
 
-    public static var featuredDappCornerRadius: CGFloat {
-        IOS_26_MODE_ENABLED ? 22 : 14
+    public static var menuCornerRadius: CGFloat {
+        IOS_26_MODE_ENABLED ? 26 : 12
     }
 
     public static var insetSectionHorizontalMargin: CGFloat {
         IOS_26_MODE_ENABLED ? 20 : 16
+    }
+    
+    public static func actionButtonSpacing(forButtonCount count: Int) -> CGFloat {
+        guard IOS_26_MODE_ENABLED else { return 8 }
+        switch count {
+        case 2: return 48
+        case 3: return 32
+        default: return 16
+        }
     }
 }
 

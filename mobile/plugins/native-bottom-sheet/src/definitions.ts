@@ -12,10 +12,10 @@ export type BottomSheetKeys =
   | 'staking-claim'
   | 'vesting-info'
   | 'vesting-confirm'
+  | 'transaction'
   | 'transaction-info'
   | 'swap-activity'
   | 'backup'
-  | 'add-account'
   | 'import-account'
   | 'settings'
   | 'qr-scanner'
@@ -25,6 +25,7 @@ export type BottomSheetKeys =
   | 'disclaimer'
   | 'backup-warning'
   | 'onramp-widget'
+  | 'offramp-widget'
   | 'mint-card'
   | 'renew-domain'
   | 'link-domain'
@@ -54,7 +55,7 @@ export interface BottomSheetPlugin {
 
   closeSelf(options: { key: BottomSheetKeys }): Promise<void>;
 
-  toggleSelfFullSize(options: { isFullSize: boolean }): Promise<void>;
+  toggleSelfFullSize(options: { isFullSize: boolean, onFocus?: boolean }): Promise<void>;
 
   openInMain(options: { key: BottomSheetKeys }): Promise<void>;
 

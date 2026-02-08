@@ -4,12 +4,14 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Types
 import org.json.JSONArray
 import org.json.JSONObject
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcore.api.ArgumentsBuilder
 import org.mytonwallet.app_air.walletcore.models.MBlockchain
 import org.mytonwallet.app_air.walletcore.moshi.ApiDapp
 import org.mytonwallet.app_air.walletcore.moshi.ApiNft
 import org.mytonwallet.app_air.walletcore.moshi.ApiNotificationAddress
 import org.mytonwallet.app_air.walletcore.moshi.ApiSubmitTransferResult
+import org.mytonwallet.app_air.walletcore.moshi.ApiSubmitTransfersResult
 import org.mytonwallet.app_air.walletcore.moshi.ApiTonConnectProof
 import org.mytonwallet.app_air.walletcore.moshi.ApiTransferToSign
 import org.mytonwallet.app_air.walletcore.moshi.DeviceInfo
@@ -77,7 +79,7 @@ sealed class ApiMethod<T> {
 
         class GetLedgerWallets(
             chain: MBlockchain,
-            network: String,
+            network: MBlockchainNetwork,
             startWalletIndex: Int,
             count: Int
         ) : ApiMethod<Array<MLedgerWalletInfo>>() {
@@ -85,34 +87,32 @@ sealed class ApiMethod<T> {
             override val type: Type = Array<MLedgerWalletInfo>::class.java
             override val arguments: String = ArgumentsBuilder()
                 .string(chain.name)
-                .string(network)
+                .string(network.value)
                 .number(startWalletIndex)
                 .number(count)
                 .build()
         }
 
         class ImportLedgerWallet(
-            network: String,
+            network: MBlockchainNetwork,
             accountInfo: MApiLedgerAccountInfo
         ) : ApiMethod<MImportedWalletResponse>() {
             override val name: String = "importLedgerAccount"
             override val type: Type = MImportedWalletResponse::class.java
             override val arguments: String = ArgumentsBuilder()
-                .string(network)
+                .string(network.value)
                 .jsObject(accountInfo, MApiLedgerAccountInfo::class.java)
-                .string(network)
-                .string(null)
                 .build()
         }
 
         class ImportViewAccount(
-            network: String,
+            network: MBlockchainNetwork,
             addressByChain: Map<MBlockchain, String>
         ) : ApiMethod<MImportedViewWalletResponse>() {
             override val name: String = "importViewAccount"
             override val type: Type = MImportedViewWalletResponse::class.java
             override val arguments: String = ArgumentsBuilder()
-                .string(network)
+                .string(network.value)
                 .jsonObject(JSONObject().apply {
                     addressByChain.forEach { (chain, address) ->
                         put(chain.name, address)
@@ -124,20 +124,6 @@ sealed class ApiMethod<T> {
 
     /* Wallet Data */
     object WalletData {
-        class GetWalletBalance(
-            chain: String,
-            network: String,
-            address: String,
-        ) : ApiMethod<BigInteger>() {
-            override val name: String = "getWalletBalance"
-            override val type: Type = BigInteger::class.java
-            override val arguments: String = ArgumentsBuilder()
-                .string(chain)
-                .string(network)
-                .string(address)
-                .build()
-        }
-
         class DecryptComment(
             accountId: String,
             activity: MApiTransaction,
@@ -161,6 +147,42 @@ sealed class ApiMethod<T> {
             override val arguments: String = ArgumentsBuilder()
                 .string(accountId)
                 .jsObject(activity, MApiTransaction::class.java)
+                .build()
+        }
+
+        class FetchTransactionById(
+            options: Options
+        ) : ApiMethod<List<MApiTransaction>>() {
+
+            @JsonClass(generateAdapter = true)
+            data class Options(
+                val chain: String,
+                val network: String,
+                val walletAddress: String,
+                val txId: String? = null,
+                val txHash: String? = null
+            )
+
+            override val name: String = "fetchTransactionById"
+            override val type: Type =
+                Types.newParameterizedType(List::class.java, MApiTransaction::class.java)
+            override val arguments: String = ArgumentsBuilder()
+                .jsObject(options, Options::class.java)
+                .build()
+        }
+    }
+
+    /* Tokens */
+    object Tokens {
+        class BuildTokenSlug(
+            chain: String,
+            address: String,
+        ) : ApiMethod<String>() {
+            override val name: String = "buildTokenSlug"
+            override val type: Type = String::class.java
+            override val arguments: String = ArgumentsBuilder()
+                .string(chain)
+                .string(address)
                 .build()
         }
     }
@@ -411,7 +433,7 @@ sealed class ApiMethod<T> {
             data class DAppArg(
                 val url: String,
                 val isUrlEnsured: Boolean,
-                val accountId: String,
+                var accountId: String,
             )
 
             class TonConnectConnect(
@@ -581,9 +603,9 @@ sealed class ApiMethod<T> {
             address: String,
             comment: String?,
             fee: BigInteger
-        ) : ApiMethod<Any>() {
+        ) : ApiMethod<ApiSubmitTransfersResult>() {
             override val name: String = "submitNftTransfers"
-            override val type: Type = Any::class.java
+            override val type: Type = ApiSubmitTransfersResult::class.java
             override val arguments: String = ArgumentsBuilder()
                 .string(accountId)
                 .string(passcode)
@@ -603,6 +625,18 @@ sealed class ApiMethod<T> {
             override val arguments: String = ArgumentsBuilder()
                 .string(accountId)
                 .string(nftAddress)
+                .build()
+        }
+
+        class FetchNftsFromCollection(
+            accountId: String,
+            collectionAddress: String,
+        ) : ApiMethod<Any>() {
+            override val name: String = "fetchNftsFromCollection"
+            override val type: Type = Boolean::class.java
+            override val arguments: String = ArgumentsBuilder()
+                .string(accountId)
+                .string(collectionAddress)
                 .build()
         }
     }

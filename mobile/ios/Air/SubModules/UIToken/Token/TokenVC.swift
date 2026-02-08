@@ -17,9 +17,10 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
 
     private var tokenVM: TokenVM!
 
-    private var accountId: String
+    @AccountContext private var account: MAccount
     private let token: ApiToken
     private let isInModal: Bool
+    private var accountContext: AccountContext { $account }
 
     var _activityViewModel: ActivityViewModel?
     public override var activityViewModel: ActivityViewModel? { self._activityViewModel }
@@ -27,13 +28,14 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
     var windowSafeAreaGuide = UILayoutGuide()
     var windowSafeAreaGuideContraint: NSLayoutConstraint!
 
-    public init(accountId: String, token: ApiToken, isInModal: Bool) async {
-        self.accountId = accountId
+    public init(accountSource: AccountSource, token: ApiToken, isInModal: Bool) async {
+        self._account = AccountContext(source: accountSource)
         self.token = token
         self.isInModal = isInModal
         super.init(nibName: nil, bundle: nil)
+        let accountId = $account.accountId
         self._activityViewModel = await ActivityViewModel(accountId: accountId, token: token, delegate: self)
-        tokenVM = TokenVM(accountId: AccountStore.account?.id ?? "",
+        tokenVM = TokenVM(accountId: accountId,
                                            selectedToken: token,
                                            tokenVMDelegate: self)
         tokenVM.refreshTransactions()
@@ -48,6 +50,7 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
     }
 
     private lazy var expandableContentView = TokenExpandableContentView(
+        accountContext: accountContext,
         isInModal: isInModal,
         parentProcessorQueue: processorQueue,
         onHeightChange: { [weak self] in
@@ -56,9 +59,7 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
     )
 
     private func updateHeaderHeight() {
-        UIView.performWithoutAnimation {
-            reconfigureHeaderPlaceholder()
-        }
+        reconfigureHeaderPlaceholder(animated: false)
     }
 
     public override var headerPlaceholderHeight: CGFloat {
@@ -103,8 +104,6 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
         return expandableNavigationView
     }()
 
-    private var tokenHeaderCell: TokenHeaderCell? = nil
-
     public override func loadView() {
         super.loadView()
         setupViews()
@@ -129,7 +128,6 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
 
         view.addLayoutGuide(windowSafeAreaGuide)
         windowSafeAreaGuideContraint = windowSafeAreaGuide.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
-        windowSafeAreaGuideContraint.isActive = true
 
         super.setupTableViews(tableViewBottomConstraint: 0)
         UIView.performWithoutAnimation {
@@ -140,11 +138,11 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
 
         view.addSubview(expandableNavigationView)
         NSLayoutConstraint.activate([
+            windowSafeAreaGuideContraint,
+
             expandableNavigationView.topAnchor.constraint(equalTo: view.topAnchor),
             expandableNavigationView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             expandableNavigationView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-
-            emptyWalletView.topAnchor.constraint(equalTo: expandableNavigationView.bottomAnchor, constant: 8)
         ])
 
         if !isInModal {
@@ -175,7 +173,7 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
     }
 
     public func updateSensitiveData() {
-        expandableContentView.balanceContainer.updateSensitiveData()
+        expandableContentView.updateSensitiveData()
     }
 
     public override func updateSkeletonViewMask() {
@@ -218,8 +216,8 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
                 } else {
                     targetContentOffset.pointee.y = 0
                 }
-            } else if realTargetY < expandableContentView.actionsOffset + 60 {
-                targetContentOffset.pointee.y = expandableContentView.actionsOffset + 60
+            } else if realTargetY < expandableContentView.actionsOffset + actionsRowHeight {
+                targetContentOffset.pointee.y = expandableContentView.actionsOffset + actionsRowHeight
             }
         }
     }
@@ -232,7 +230,7 @@ public class TokenVC: ActivitiesTableViewController, Sendable, WSensitiveDataPro
         let token = self.token
 
         let openInExplorer = UIAction(title: lang("Open in Explorer"), image: UIImage(named: "SendGlobe", in: AirBundle, with: nil)) { _ in
-            openUrl(ExplorerHelper.explorerUrlForToken(token))
+            openUrl(ExplorerHelper.tokenUrl(token: token))
         }
         let explorerSection = UIMenu(options: .displayInline, children: [openInExplorer])
 
@@ -260,15 +258,13 @@ extension TokenVC: TokenVMDelegate {
         reconfigureFirstRowCell()
     }
     func accountChanged() {
-        guard let newAccountId = AccountStore.accountId else { return }
+        guard accountContext.source == .current else { return }
+        let newAccountId = accountContext.accountId
         Task {
-            self.accountId = newAccountId
             self._activityViewModel = await ActivityViewModel(accountId: newAccountId, token: token, delegate: self)
             self.tokenVM = TokenVM(accountId: newAccountId, selectedToken: token, tokenVMDelegate: self)
             self.tokenVM.refreshTransactions()
         }
-    }
-    func cacheNotFound() {
     }
 }
 
@@ -284,4 +280,3 @@ extension TokenVC: ActivityViewModelDelegate {
         super.transactionsUpdated(accountChanged: false, isUpdateEvent: false)
     }
 }
-

@@ -129,6 +129,10 @@ public extension Color {
         public let primaryLabel: Color = Color(UIColor.label)
         public let secondaryLabel: Color = .airBundle("AirSecondaryLabelColor")
         public let groupedItem: Color = .airBundle("GroupedItemColor")
+        public let groupedBackground: Color = .airBundle("GroupedBackgroundColor")
+        public let sheetBackground: Color = .airBundle("SheetBackgroundColor")
+        public let highlight: Color = .airBundle("HighlightColor")
+        public let error: Color = .red
         
         public var tint: Color { Color(WTheme.tint) }
     }

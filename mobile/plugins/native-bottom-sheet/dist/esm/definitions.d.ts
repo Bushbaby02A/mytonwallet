@@ -1,5 +1,5 @@
 import type { PluginListenerHandle } from '@capacitor/core';
-export type BottomSheetKeys = 'initial' | 'receive' | 'invoice' | 'transfer' | 'swap' | 'stake' | 'unstake' | 'staking-info' | 'staking-claim' | 'vesting-info' | 'vesting-confirm' | 'transaction-info' | 'swap-activity' | 'backup' | 'add-account' | 'import-account' | 'settings' | 'qr-scanner' | 'dapp-connect' | 'dapp-transfer' | 'dapp-sign-data' | 'disclaimer' | 'backup-warning' | 'onramp-widget' | 'mint-card' | 'renew-domain' | 'link-domain' | 'account-selector' | 'customize-wallet';
+export type BottomSheetKeys = 'initial' | 'receive' | 'invoice' | 'transfer' | 'swap' | 'stake' | 'unstake' | 'staking-info' | 'staking-claim' | 'vesting-info' | 'vesting-confirm' | 'transaction' | 'transaction-info' | 'swap-activity' | 'backup' | 'import-account' | 'settings' | 'qr-scanner' | 'dapp-connect' | 'dapp-transfer' | 'dapp-sign-data' | 'disclaimer' | 'backup-warning' | 'onramp-widget' | 'offramp-widget' | 'mint-card' | 'renew-domain' | 'link-domain' | 'account-selector' | 'customize-wallet';
 export interface BottomSheetPlugin {
     prepare(): Promise<void>;
     applyScrollPatch(options?: {
@@ -29,6 +29,7 @@ export interface BottomSheetPlugin {
     }): Promise<void>;
     toggleSelfFullSize(options: {
         isFullSize: boolean;
+        onFocus?: boolean;
     }): Promise<void>;
     openInMain(options: {
         key: BottomSheetKeys;

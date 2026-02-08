@@ -430,7 +430,9 @@ export async function getStakingStates(
     promises.push(buildNominatorsState(options));
   }
 
-  if (TON_USDE.slug in balances && (!commonData.ethena.isDisabled || DEBUG)) {
+  const hasEthenaBalance = TON_USDE.slug in balances || TON_TSUSDE.slug in balances;
+
+  if (hasEthenaBalance && (!commonData.ethena.isDisabled || DEBUG)) {
     promises.push(buildEthenaState(options));
   }
 
@@ -592,7 +594,7 @@ async function buildEthenaState(options: StakingStateOptions): Promise<ApiEthena
   const {
     network, balances, address: walletAddress,
     commonData, commonData: { ethena: { apy, apyVerified } },
-    backendState: { ethena: { isVerified } },
+    backendState: { ethena: { isVerified, isBoostAvailable } },
   } = options;
 
   const rate = network === 'testnet' ? 1 : commonData.ethena.rate;
@@ -618,6 +620,7 @@ async function buildEthenaState(options: StakingStateOptions): Promise<ApiEthena
     tokenBalance,
     unstakeRequestAmount: lockedUsdeBalance,
     unlockTime: unlockTime && lockedUsdeBalance ? unlockTime * 1000 : undefined,
+    isBoostAvailable,
     tsUsdeWalletAddress,
   };
 

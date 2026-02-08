@@ -14,7 +14,9 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.LinearLayout
 import androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
 import androidx.core.content.ContextCompat
+import androidx.core.view.isGone
 import androidx.core.view.setPadding
+import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -33,6 +35,7 @@ import org.mytonwallet.app_air.uicomponents.base.WNavigationController
 import org.mytonwallet.app_air.uicomponents.base.WRecyclerViewAdapter
 import org.mytonwallet.app_air.uicomponents.base.WViewController
 import org.mytonwallet.app_air.uicomponents.base.WWindow
+import org.mytonwallet.app_air.uicomponents.commonViews.ReversedCornerView
 import org.mytonwallet.app_air.uicomponents.commonViews.WEmptyIconView
 import org.mytonwallet.app_air.uicomponents.commonViews.cells.ShowAllView
 import org.mytonwallet.app_air.uicomponents.extensions.dp
@@ -50,13 +53,16 @@ import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup
 import org.mytonwallet.app_air.uicomponents.widgets.recyclerView.CustomItemTouchHelper
 import org.mytonwallet.app_air.uicomponents.widgets.segmentedController.WSegmentedControllerItemVC
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
+import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcontext.utils.IndexPath
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
+import org.mytonwallet.app_air.walletcore.helpers.ExplorerHelpers
 import org.mytonwallet.app_air.walletcore.models.NftCollection
 import org.mytonwallet.app_air.walletcore.moshi.ApiNft
 import org.mytonwallet.app_air.walletcore.stores.AccountStore
@@ -64,10 +70,12 @@ import java.lang.ref.WeakReference
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 @SuppressLint("ViewConstructor")
 class AssetsVC(
     context: Context,
+    defaultAccountId: String,
     private val mode: Mode,
     private var injectedWindow: WWindow? = null,
     val collectionMode: CollectionMode? = null,
@@ -76,10 +84,13 @@ class AssetsVC(
     private val onHeightChanged: (() -> Unit)? = null,
     private val onScroll: ((rv: RecyclerView) -> Unit)? = null,
     private val onReorderingRequested: (() -> Unit)? = null,
+    private val onNftsShown: (() -> Unit)? = null,
+    private val shouldAnimateHeight: (() -> Boolean)? = null,
 ) : WViewController(context),
     WRecyclerViewAdapter.WRecyclerViewDataSource, AssetsVM.Delegate,
     WSegmentedControllerItemVC,
     ISortableView {
+    override val TAG = "Assets"
 
     val identifier: String
         get() {
@@ -148,8 +159,19 @@ class AssetsVC(
 
     override val shouldDisplayTopBar = isShowingSingleCollection
 
+    val underSegmentedControlReversedCornerView: ReversedCornerView? by lazy {
+        if (mode == Mode.COMPLETE && !isShowingSingleCollection) ReversedCornerView(
+            context,
+            ReversedCornerView.Config(
+                shouldBlur = false,
+            )
+        ).apply {
+            setHorizontalPadding(0f)
+        } else null
+    }
+
     private val assetsVM by lazy {
-        AssetsVM(collectionMode, this)
+        AssetsVM(collectionMode, defaultAccountId, this)
     }
 
     private val thereAreMoreToShow: Boolean
@@ -166,7 +188,7 @@ class AssetsVC(
                 val rows = if ((assetsVM.nfts?.size ?: 0) > 3) 2 else 1
                 rows * (recyclerView.width - 32.dp) / 3 +
                     4.dp +
-                    (if (thereAreMoreToShow) 56 else 8).dp
+                    (if (thereAreMoreToShow) 64 else 8).dp
             }
         }
 
@@ -181,6 +203,8 @@ class AssetsVC(
         get() {
             return mode == Mode.COMPLETE
         }
+
+    private var animationsPaused: Boolean? = null
 
     private val itemTouchHelper by lazy {
         val callback = object : CustomItemTouchHelper.SimpleCallback(
@@ -290,6 +314,8 @@ class AssetsVC(
             if (dx == 0 && dy == 0)
                 return
             updateBlurViews(recyclerView)
+            underSegmentedControlReversedCornerView?.translationY =
+                -recyclerView.computeVerticalScrollOffset().toFloat()
             onScroll?.invoke(recyclerView)
         }
 
@@ -398,7 +424,7 @@ class AssetsVC(
             itemTouchHelper.attachToRecyclerView(rv)
         }
 
-        if (mode == Mode.COMPLETE && collectionMode == null)
+        if (mode == Mode.COMPLETE && !isShowingSingleCollection)
             rv.disallowInterceptOnOverscroll()
 
         rv
@@ -406,14 +432,17 @@ class AssetsVC(
 
     private val showAllView: ShowAllView by lazy {
         val v = ShowAllView(context)
-        v.titleLabel.text =
-            LocaleController.getString("Show All Collectibles")
+        v.configure(
+            icon = org.mytonwallet.app_air.uiassets.R.drawable.ic_show_collectibles,
+            text = LocaleController.getFormattedString("Show All %1$@", listOf(title ?: ""))
+        )
         v.onTap = {
             val window = injectedWindow ?: this.window!!
             val navVC = WNavigationController(window)
             navVC.setRoot(
                 AssetsTabVC(
                     context,
+                    assetsVM.showingAccountId,
                     defaultSelectedIdentifier = collectionMode?.collectionAddress
                         ?: AssetsTabVC.TAB_COLLECTIBLES
                 )
@@ -449,11 +478,11 @@ class AssetsVC(
     val homeCollectionAddress: String
         get() {
             return when (collectionMode) {
-                is CollectionMode.SingleCollection -> {
+                is SingleCollection -> {
                     collectionMode.collection.address
                 }
 
-                CollectionMode.TelegramGifts -> {
+                TelegramGifts -> {
                     NftCollection.TELEGRAM_GIFTS_SUPER_COLLECTION
                 }
 
@@ -484,11 +513,14 @@ class AssetsVC(
                         false,
                     ) {
                         val url = when (collectionMode) {
-                            is CollectionMode.SingleCollection -> {
-                                "https://getgems.io/collection/${collectionMode.collection.address}"
+                            is SingleCollection -> {
+                                val getGemsUrl = ExplorerHelpers.getgemsUrl(
+                                    network = MBlockchainNetwork.ofAccountId(assetsVM.showingAccountId)
+                                )
+                                "${getGemsUrl}collection/${collectionMode.collection.address}"
                             }
 
-                            CollectionMode.TelegramGifts -> {
+                            TelegramGifts -> {
                                 "https://getgems.io/top-gifts"
                             }
 
@@ -497,7 +529,7 @@ class AssetsVC(
                         openLink(url)
                     }
                 )
-                if (collectionMode == CollectionMode.TelegramGifts) {
+                if (collectionMode == TelegramGifts) {
                     items.add(
                         0,
                         WMenuPopup.Item(
@@ -514,7 +546,7 @@ class AssetsVC(
                             openLink("https://fragment.com/gifts")
                         })
                 }
-                if (collectionMode is CollectionMode.SingleCollection) {
+                if (collectionMode is SingleCollection) {
                     items.add(
                         WMenuPopup.Item(
                             WMenuPopup.Item.Config.Item(
@@ -535,7 +567,7 @@ class AssetsVC(
                     this,
                     items,
                     popupWidth = WRAP_CONTENT,
-                    aboveView = true
+                    positioning = WMenuPopup.Positioning.ALIGNED
                 )
             }
         }
@@ -564,6 +596,18 @@ class AssetsVC(
         if (mode == Mode.THUMB) {
             view.addView(showAllView, LayoutParams(MATCH_PARENT, 56.dp))
         }
+        underSegmentedControlReversedCornerView?.let { underSegmentedControlReversedCornerView ->
+            view.addView(
+                underSegmentedControlReversedCornerView,
+                LayoutParams(
+                    MATCH_PARENT,
+                    WNavigationBar.DEFAULT_HEIGHT.dp +
+                        (navigationController?.getSystemBars()?.top ?: 0) +
+                        underSegmentedControlReversedCornerView.cornerRadius.roundToInt()
+                )
+            )
+        }
+        emptyView?.bringToFront()
         view.setConstraints {
             if (mode == Mode.THUMB) {
                 toCenterX(showAllView)
@@ -573,12 +617,17 @@ class AssetsVC(
                     recyclerView,
                     ViewConstants.HORIZONTAL_PADDINGS.toFloat()
                 )
+            underSegmentedControlReversedCornerView?.let {
+                toTop(it)
+            }
         }
 
         assetsVM.delegateIsReady()
 
         if (onReorderingRequested != null) {
             itemTouchHelper.setBeforeLongPressListener {
+                if (isShowingEmptyView)
+                    return@setBeforeLongPressListener
                 assetsVM.isInDragMode = true
                 onReorderingRequested.invoke()
                 rvAdapter.updateVisibleCells()
@@ -594,8 +643,23 @@ class AssetsVC(
         }
     }
 
+    fun configure(accountId: String) {
+        if (assetsVM.showingAccountId == accountId)
+            return
+        emptyView?.isGone = true
+        isShowingEmptyView = false
+        assetsVM.configure(accountId)
+        currentHeight = finalHeight
+    }
+
+    private var _isDarkThemeApplied: Boolean? = null
     override fun updateTheme() {
         super.updateTheme()
+
+        val darkModeChanged = ThemeManager.isDark != _isDarkThemeApplied
+        if (!darkModeChanged)
+            return
+        _isDarkThemeApplied = ThemeManager.isDark
 
         if (mode == Mode.THUMB) {
             view.background = null
@@ -634,6 +698,20 @@ class AssetsVC(
         pinButton.addRippleEffect(WColor.BackgroundRipple.color, 20f.dp)
     }
 
+    private fun updateShowAllPosition() {
+        if (mode == Mode.THUMB) {
+            val newShowAllViewToTop = finalHeight - 56.dp
+            if (prevShowAllViewToTop != newShowAllViewToTop) {
+                prevShowAllViewToTop = newShowAllViewToTop
+                view.setConstraints {
+                    toTopPx(showAllView, newShowAllViewToTop)
+                }
+            }
+
+            animateHeight()
+        }
+    }
+
     override fun insetsUpdated() {
         super.insetsUpdated()
         if (mode == Mode.COMPLETE) {
@@ -645,9 +723,13 @@ class AssetsVC(
                 navigationController?.getSystemBars()?.bottom ?: 0
             )
         }
+        updateShowAllPosition()
     }
 
     fun setAnimations(paused: Boolean) {
+        if (animationsPaused == paused)
+            return
+        animationsPaused = paused
         val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
         layoutManager?.let {
             val firstVisible = it.findFirstVisibleItemPosition()
@@ -673,7 +755,14 @@ class AssetsVC(
     }
 
     private fun onNftTap(nft: ApiNft) {
-        val assetVC = NftVC(context, nft, assetsVM.nfts!!)
+        if (assetsVM.isInDragMode)
+            return
+        val assetVC = NftVC(
+            context,
+            assetsVM.showingAccountId,
+            nft,
+            assetsVM.nfts!!
+        )
         val window = injectedWindow ?: window!!
         val tabNav = window.navigationControllers.last().tabBarController?.navigationController
         if (tabNav != null)
@@ -720,7 +809,11 @@ class AssetsVC(
         indexPath: IndexPath
     ) {
         val cell = cellHolder.cell as AssetCell
-        cell.configure(assetsVM.nfts!![indexPath.row], assetsVM.isInDragMode)
+        cell.configure(
+            assetsVM.nfts!![indexPath.row],
+            assetsVM.isInDragMode,
+            animationsPaused == false
+        )
     }
 
     var isShowingEmptyView = false
@@ -778,6 +871,7 @@ class AssetsVC(
         }
     }
 
+    private var prevShowAllViewToTop = 0
     override fun nftsUpdated() {
         assetsVM.nfts?.size?.let { nftsCount ->
             setNavSubtitle(
@@ -795,17 +889,17 @@ class AssetsVC(
             updateRecyclerViewPaddingForCentering()
         showAllView.visibility = if (thereAreMoreToShow) View.VISIBLE else View.GONE
 
-        if (mode == Mode.THUMB) {
-            view.setConstraints {
-                toTopPx(showAllView, finalHeight - 56.dp)
-            }
+        updateShowAllPosition()
+    }
 
-            animateHeight()
-        }
+    override fun nftsShown() {
+        onNftsShown?.invoke()
     }
 
     private fun animateHeight() {
-        currentHeight?.let {
+        if (currentHeight == finalHeight)
+            return
+        if (currentHeight != null && shouldAnimateHeight?.invoke() != false) {
             ValueAnimator.ofInt(currentHeight!!, finalHeight).apply {
                 duration = AnimationConstants.VERY_QUICK_ANIMATION
                 interpolator = CubicBezierInterpolator.EASE_BOTH
@@ -821,7 +915,7 @@ class AssetsVC(
 
                 start()
             }
-        } ?: run {
+        } else {
             currentHeight = finalHeight
             onHeightChanged?.invoke()
         }
@@ -855,6 +949,7 @@ class AssetsVC(
 
     override fun onDestroy() {
         super.onDestroy()
+        assetsVM.onDestroy()
         recyclerView.onDestroy()
         itemTouchHelper.attachToRecyclerView(null)
         recyclerView.adapter = null
@@ -863,10 +958,22 @@ class AssetsVC(
 
     override fun onFullyVisible() {
         setAnimations(paused = false)
+        setReversedCornerViewRadius(null)
     }
 
     override fun onPartiallyVisible() {
         setAnimations(paused = true)
+        setReversedCornerViewRadius(0f)
+    }
+
+    private fun setReversedCornerViewRadius(radius: Float?) {
+        underSegmentedControlReversedCornerView?.setRadius(radius)
+        if (underSegmentedControlReversedCornerView?.layoutParams != null)
+            underSegmentedControlReversedCornerView?.updateLayoutParams {
+                height = WNavigationBar.DEFAULT_HEIGHT.dp +
+                    (navigationController?.getSystemBars()?.top ?: 0) +
+                    underSegmentedControlReversedCornerView!!.cornerRadius.roundToInt()
+            }
     }
 
     private fun openLink(url: String) {
@@ -890,8 +997,9 @@ class AssetsVC(
     }
 
     fun reloadList() {
-        assetsVM.updateNftsArray(keepOrder = false)
-        rvAdapter.reloadData()
+        assetsVM.loadCachedNftsAsync(keepOrder = false, onFinished = {
+            rvAdapter.reloadData()
+        })
         /*if (hasChanged) {
             recyclerView.fadeOut(AnimationConstants.VERY_QUICK_ANIMATION) {
                 rvAdapter.reloadData()

@@ -24,11 +24,11 @@ public class HomeTabBarController: UITabBarController, WThemedView {
     
     public enum Tab: Int {
         case home
-        case browser
+        case explore
         case settings
     }
 
-    private var homeVC: HomeVC!
+    private(set) public var homeVC: HomeVC!
     
     private var forwardedGestureRecognizer: ForwardedGestureRecognizer!
     private var blurView: WBlurView!
@@ -85,8 +85,8 @@ public class HomeTabBarController: UITabBarController, WThemedView {
         NotificationCenter.default.addObserver(self, selector: #selector(tryUnlockIfLocked), name: UIApplication.didBecomeActiveNotification, object: nil)
         
         let homeNav = WNavigationController(rootViewController: homeVC)
-        let settingsViewController = SettingsVC()
-        let browserViewController = ExploreTabVC()
+        let settingsViewController = WNavigationController(rootViewController: SettingsVC())
+        let browserViewController = WNavigationController(rootViewController: ExploreTabVC())
         
         homeNav.tabBarItem.image = UIImage(named: "tab_home", in: AirBundle, compatibleWith: nil)
         homeNav.title = lang("Wallet")
@@ -101,7 +101,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
         self.viewControllers = [
             homeNav,
             browserViewController,
-            WNavigationController(rootViewController: settingsViewController)
+            settingsViewController,
         ]
         
         addBlurEffectBackground()
@@ -126,11 +126,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
         }
     }
     
-    @objc func showLock() {
-        _showLock(animated: false)
-    }
-    
-    public func _showLock(animated: Bool) {
+    public func _showLock(animated: Bool, onUnlock: @escaping () -> ()) {
         log.info("_showLock animated=\(animated)")
         guard AuthSupport.accountsSupportAppLock else { return }
         if unlockVC == nil {
@@ -140,6 +136,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
                                     dissmissWhenAuthorized: true,
                                     shouldBeThemedLikeHeader: true) { _ in
                 self.unlockVC = nil
+                onUnlock()
             }
             unlockVC.modalPresentationStyle = .overFullScreen
             unlockVC.modalTransitionStyle = .crossDissolve
@@ -148,7 +145,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
             if topVC is UIActivityViewController {
                 let presenting = topVC.presentingViewController!
                 presenting.dismiss(animated: false) {
-                    self._showLock(animated: animated)
+                    self._showLock(animated: animated, onUnlock: onUnlock)
                 }
             } else {
                 topVC.present(unlockVC, animated: animated, completion: {
@@ -168,18 +165,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
         }
     }
     
-    @objc func tryUnlock() {
-        log.info(" ")
-        log.info("tryUnlock")
-        if unlockVC == nil {
-            log.info("tryUnlock lock not found")
-            _showLock(animated: false)
-        }
-        unlockVC?.tryBiometric()
-    }
-    
     @objc func tryUnlockIfLocked() {
-        log.info(" ")
         log.info("tryUnlockIfLocked")
         unlockVC?.tryBiometric()
     }
@@ -191,8 +177,8 @@ public class HomeTabBarController: UITabBarController, WThemedView {
     }
     
     open override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
-        super.dismiss(animated: flag, completion: { [self] in
-            WalletCoreData.notify(event: .sheetDismissed(self))
+        super.dismiss(animated: flag, completion: {
+            WalletCoreData.notify(event: .sheetDismissed)
             completion?()
         })
     }
@@ -220,7 +206,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
     }
     
     func tabChanged(to selectedIndex: Int) {
-        tabBarBorder?.isHidden = selectedIndex == Tab.browser.rawValue
+        tabBarBorder?.isHidden = selectedIndex == Tab.explore.rawValue
     }
 
     public var currentTab: Tab {
@@ -237,6 +223,20 @@ public class HomeTabBarController: UITabBarController, WThemedView {
         }
     }
     
+    public func switchToHome(popToRoot: Bool) {
+        selectedIndex = Tab.home.rawValue
+        if popToRoot {
+            homeVC?.navigationController?.popToRootViewController(animated: true)
+        }
+        if presentedViewController != nil {
+            dismiss(animated: true)
+        }
+    }
+    
+    public func switchToExplore() {
+        selectedIndex = Tab.explore.rawValue
+    }
+
     private func addBlurEffectBackground() {
         blurView = WBlurView()
         tabBar.insertSubview(blurView, at: 0)
@@ -263,14 +263,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
         blurViewSnapshot.backgroundColor = .clear
     }
     
-    private func image(for account: MAccount?) -> UIImage? {
-        return .avatar(for: account, withSize: 25)
-    }
-    
     private func accountChanged() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) {
-            self.selectedIndex = Tab.home.rawValue
-        }
         if let presentedViewController, presentedViewController.description.contains("UIInAppBrowser"), isSheetMinimized {
             dismiss(animated: true)
         }
@@ -316,6 +309,7 @@ public class HomeTabBarController: UITabBarController, WThemedView {
     }
     
     @objc func onTouch(_ gesture: UIGestureRecognizer) {
+        guard !UIAccessibility.buttonShapesEnabled else { return }
         if gesture.state == .began {
             if let view = gesture.view {
                 guard view.center.x > 280 else { return }
@@ -503,9 +497,8 @@ public class HomeTabBarController: UITabBarController, WThemedView {
     
     private func showSwitchWallet(gesture: UIGestureRecognizer?) {
         
-        let feedbackGenerator = UIImpactFeedbackGenerator(style: .rigid)
-        feedbackGenerator.impactOccurred(intensity: 0.9)
-        let switchAccountVC = SwitchAccountVC(accounts: AccountStore.allAccounts, iconColor: currentTab == .settings ? WTheme.tint : WTheme.secondaryLabel)
+        Haptics.play(.drag)
+        let switchAccountVC = SwitchAccountVC(iconColor: currentTab == .settings ? WTheme.tint : WTheme.secondaryLabel)
         switchAccountVC.modalPresentationStyle = .overFullScreen
         switchAccountVC.startingGestureRecognizer = gesture ?? forwardedGestureRecognizer
 //        switchAccountVC.dismissCallback = {
@@ -531,10 +524,13 @@ extension HomeTabBarController: UIGestureRecognizerDelegate {
 extension HomeTabBarController: UITabBarControllerDelegate {
     
     public func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+        if self.presentedViewController is SwitchAccountVC {
+            return false
+        }
         if viewController === selectedViewController  {
             scrollToTop(tabVC: viewController)
         }
-        tabBarBorder?.isHidden = selectedIndex == Tab.browser.rawValue
+        tabBarBorder?.isHidden = selectedIndex == Tab.explore.rawValue
         return true
     }
     
@@ -594,7 +590,7 @@ extension HomeTabBarController: WalletCoreData.EventsObserver {
     
     private func handleConfig(_ config: ApiUpdate.UpdateConfig) {
         if config.isAppUpdateRequired == true {
-            topWViewController()?.showToast(message: lang("Update %app_name%", arg1: "MyTonWallet"), duration: nil, tapAction: {
+            AppActions.showToast(message: lang("Update %app_name%", arg1: "MyTonWallet"), duration: nil, tapAction: {
                 UIApplication.shared.open(URL(string: "https://get.mytonwallet.io/ios")!)
             })
         }

@@ -15,7 +15,7 @@ public class FeeEstimationHelpers {
             return nil
         }
         let tokenInChain = ApiChain(rawValue: sellToken.chain)
-        let nativeUserTokenIn = sellToken.isOnChain == true ? TokenStore.tokens[tokenInChain?.tokenSlug ?? ""] : nil
+        let nativeUserTokenIn = sellToken.isOnChain == true ? TokenStore.tokens[tokenInChain?.nativeToken.slug ?? ""] : nil
         let isNativeIn = sellToken.slug == nativeUserTokenIn?.slug
         let chainConfigIn = tokenInChain?.gas
         let fee = {
@@ -24,11 +24,11 @@ public class FeeEstimationHelpers {
                 return value
             }
             
-            if (networkFee ?? 0 > 0) {
-                value = doubleToBigInt(networkFee!, decimals: nativeUserTokenIn?.decimals ?? 9)
-            } else if (swapType == SwapType.inChain) {
+            if let networkFee, networkFee > 0, let decimals = nativeUserTokenIn?.decimals {
+                value = doubleToBigInt(networkFee, decimals: decimals)
+            } else if (swapType == SwapType.onChain) {
                 value = chainConfigIn?.maxSwap ?? 0
-            } else if (swapType == SwapType.crossChainFromTon) {
+            } else if (swapType == SwapType.crosschainFromWallet || swapType == SwapType.crosschainInsideWallet) {
                 value = (isNativeIn == true ? chainConfigIn?.maxTransfer : chainConfigIn?.maxTransferToken) ?? 0
             }
             

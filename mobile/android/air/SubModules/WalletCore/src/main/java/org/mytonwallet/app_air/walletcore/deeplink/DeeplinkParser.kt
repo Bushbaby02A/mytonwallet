@@ -6,6 +6,7 @@ import android.os.Bundle
 import org.mytonwallet.app_air.walletcontext.helpers.AddressHelpers
 import org.mytonwallet.app_air.walletcore.TRON_USDT_SLUG
 import org.mytonwallet.app_air.walletcore.models.InAppBrowserConfig
+import org.mytonwallet.app_air.walletcore.models.MBlockchain
 import java.net.URLDecoder
 
 sealed class Deeplink {
@@ -49,16 +50,25 @@ sealed class Deeplink {
 
     data class Transaction(
         override val accountAddress: String?,
-        val txId: String
+        val chain: String?,
+        val txId: String?,
+        val txHash: String?,
+        val isPushNotification: Boolean
     ) : Deeplink()
 
-    data class Jetton(
+    data class TokenBySlug(override val accountAddress: String?, val slug: String) : Deeplink()
+    data class TokenByAddress(
         override val accountAddress: String?,
-        val slug: String
+        val chain: String,
+        val address: String
     ) : Deeplink()
 
     data class StakeTx(override val accountAddress: String?, val stakingId: String) : Deeplink()
     data class SwitchToLegacy(override val accountAddress: String?) : Deeplink()
+    data class View(
+        override val accountAddress: String?,
+        val addressByChain: Map<String, String>
+    ) : Deeplink()
 }
 
 interface DeeplinkNavigator {
@@ -106,14 +116,16 @@ class DeeplinkParser {
                     )
                 }
 
-                "nativeTx", "swap" -> {
+                "nativeTx", "swap", "jettonTx" -> {
                     val txId = bundle.getString("txId") ?: return null
-                    return Deeplink.Transaction(accountAddress = address, txId = txId)
-                }
-
-                "jettonTx" -> {
-                    val slug = bundle.getString("slug") ?: return null
-                    return Deeplink.Jetton(accountAddress = address, slug = slug)
+                    val chain = bundle.getString("chain") ?: MBlockchain.ton.name
+                    return Deeplink.Transaction(
+                        accountAddress = address,
+                        chain = chain,
+                        txId = txId,
+                        txHash = null,
+                        isPushNotification = true
+                    )
                 }
 
                 "staking" -> {
@@ -232,6 +244,52 @@ class DeeplinkParser {
 
                 "classic" -> {
                     Deeplink.SwitchToLegacy(null)
+                }
+
+                "token" -> {
+                    val pathParts = uri.pathSegments
+
+                    if (pathParts.size > 1) {
+                        val chain = pathParts[0]
+                        val tokenAddress = pathParts[1]
+                        return Deeplink.TokenByAddress(null, chain, tokenAddress)
+                    } else {
+                        pathParts.firstOrNull()?.let { tokenSlug ->
+                            return Deeplink.TokenBySlug(null, tokenSlug)
+                        }
+                    }
+                }
+
+                "tx" -> {
+                    val pathParts = uri.pathSegments
+
+                    if (pathParts.size > 1) {
+                        val chain = pathParts[0]
+                        val txId = pathParts.drop(1).joinToString("/")
+                        return Deeplink.Transaction(
+                            accountAddress = null,
+                            chain = chain,
+                            txId = txId,
+                            txHash = null,
+                            isPushNotification = false,
+                        )
+                    } else {
+                        return null
+                    }
+                }
+
+                "view" -> {
+                    val addressByChain = mutableMapOf<String, String>()
+                    MBlockchain.supportedChainValues.forEach { chain ->
+                        val address = uri.getQueryParameter(chain)
+                        if (!address.isNullOrBlank()) {
+                            val blockchain = MBlockchain.valueOf(chain)
+                            if (blockchain.isValidAddress(address) || blockchain.isValidDNS(address)) {
+                                addressByChain[chain] = address
+                            }
+                        }
+                    }
+                    return Deeplink.View(accountAddress = null, addressByChain = addressByChain)
                 }
 
                 else -> {

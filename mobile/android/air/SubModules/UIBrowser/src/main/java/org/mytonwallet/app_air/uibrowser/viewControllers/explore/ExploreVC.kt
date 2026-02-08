@@ -25,7 +25,6 @@ import org.mytonwallet.app_air.uicomponents.base.WRecyclerViewAdapter
 import org.mytonwallet.app_air.uicomponents.base.WViewController
 import org.mytonwallet.app_air.uicomponents.commonViews.WEmptyIconView
 import org.mytonwallet.app_air.uicomponents.extensions.dp
-import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.widgets.SwapSearchEditText
 import org.mytonwallet.app_air.uicomponents.widgets.WCell
 import org.mytonwallet.app_air.uicomponents.widgets.WRecyclerView
@@ -37,6 +36,7 @@ import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletbasecontext.utils.ceilToInt
 import org.mytonwallet.app_air.walletcontext.utils.IndexPath
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.models.InAppBrowserConfig
@@ -45,12 +45,12 @@ import org.mytonwallet.app_air.walletcore.models.MExploreSite
 import org.mytonwallet.app_air.walletcore.moshi.ApiDapp
 import org.mytonwallet.app_air.walletcore.stores.ExploreHistoryStore
 import java.lang.ref.WeakReference
-import kotlin.math.ceil
 import kotlin.math.max
 
 @SuppressLint("ViewConstructor")
 class ExploreVC(context: Context) : WViewController(context),
     WRecyclerViewAdapter.WRecyclerViewDataSource, ExploreVM.Delegate {
+    override val TAG = "Explore"
 
     override val ignoreSideGuttering: Boolean = true
 
@@ -66,7 +66,6 @@ class ExploreVC(context: Context) : WViewController(context),
         const val SECTION_TRENDING = 2
         const val SECTION_ALL = 3
 
-        private const val PADDING = 4
     }
 
     override val shouldDisplayTopBar = false
@@ -150,7 +149,6 @@ class ExploreVC(context: Context) : WViewController(context),
 
         setupNavBar(true)
         setTopBlur(visible = false, animated = false)
-        navigationBar?.titleLabel?.setStyle(22f, WFont.Medium)
         navigationBar?.setTitleGravity(Gravity.START)
 
         view.addView(recyclerView, ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -166,7 +164,7 @@ class ExploreVC(context: Context) : WViewController(context),
     override fun updateTheme() {
         super.updateTheme()
         view.setBackgroundColor(WColor.SecondaryBackground.color)
-        rvAdapter.reloadData()
+        rvAdapter.updateTheme()
     }
 
     override fun insetsUpdated() {
@@ -176,7 +174,7 @@ class ExploreVC(context: Context) : WViewController(context),
             0,
             topPadding,
             0,
-            PADDING.dp + (navigationController?.getSystemBars()?.bottom ?: 0)
+            navigationController?.getSystemBars()?.bottom ?: 0
         )
         bottomReversedCornerView?.setHorizontalPadding(ViewConstants.HORIZONTAL_PADDINGS.dp.toFloat())
         rvAdapter.reloadData()
@@ -188,6 +186,7 @@ class ExploreVC(context: Context) : WViewController(context),
     }
 
     override fun viewWillDisappear() {
+        // We don't want to hide keyboard on search, so super.viewWillDisappear is not called here.
         isDisappeared = true
     }
 
@@ -251,9 +250,8 @@ class ExploreVC(context: Context) : WViewController(context),
     val catsCount: Int
         get() {
             val colCount = calculateNoOfColumns()
-            return ceil(
-                (exploreVM.showingExploreCategories?.size ?: 0) / colCount.toFloat()
-            ).toInt() * colCount
+            return ((exploreVM.showingExploreCategories?.size
+                ?: 0) / colCount.toFloat()).ceilToInt() * colCount
         }
 
     val showLargeConnectedApps: Boolean

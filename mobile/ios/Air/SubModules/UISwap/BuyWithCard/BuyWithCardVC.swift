@@ -11,12 +11,13 @@ import UIComponents
 import WalletCore
 import WalletContext
 import SwiftUI
-import Combine
+import Perception
+import SwiftNavigation
 
 public class BuyWithCardVC: WViewController, UIScrollViewDelegate {
     
     let model: BuyWithCardModel
-    var observer: AnyCancellable?
+    var observer: ObserveToken?
     
     public init(chain: ApiChain) {
         self.model = BuyWithCardModel(chain: chain, selectedCurrency: TokenStore.baseCurrency)
@@ -30,9 +31,9 @@ public class BuyWithCardVC: WViewController, UIScrollViewDelegate {
     public override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
-        loadOnramp(currency: model.selectedCurrency)
-        observer = model.$selectedCurrency.sink { [weak self] currency in
-            self?.loadOnramp(currency: currency)
+        observer = observe { [weak self] in
+            guard let self else { return }
+            loadOnramp(currency: model.selectedCurrency)
         }
     }
 
@@ -77,7 +78,7 @@ public class BuyWithCardVC: WViewController, UIScrollViewDelegate {
     private func loadOnramp(currency: MBaseCurrency) {
         
         if currency == .RUB {
-            open(url: "https://dreamwalkers.io/ru/mytonwallet/?wallet=\(AccountStore.account?.tonAddress ?? "")&give=CARDRUB&take=TON&type=buy")
+            open(url: "https://dreamwalkers.io/ru/mytonwallet/?wallet=\(AccountStore.account?.addressByChain[TON_CHAIN] ?? "")&give=CARDRUB&take=TON&type=buy")
         } else {
             guard let address = AccountStore.account?.addressByChain[model.chain.rawValue] else { return }
             Task {

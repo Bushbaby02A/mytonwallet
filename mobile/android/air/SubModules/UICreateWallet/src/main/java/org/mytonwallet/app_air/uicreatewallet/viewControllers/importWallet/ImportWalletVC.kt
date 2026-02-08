@@ -32,28 +32,32 @@ import org.mytonwallet.app_air.uicomponents.widgets.suggestion.WSuggestionView
 import org.mytonwallet.app_air.uicreatewallet.viewControllers.intro.IntroVC
 import org.mytonwallet.app_air.uicreatewallet.viewControllers.walletAdded.WalletAddedVC
 import org.mytonwallet.app_air.uipasscode.viewControllers.setPasscode.SetPasscodeVC
-import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
+import org.mytonwallet.app_air.walletbasecontext.logger.LogMessage
+import org.mytonwallet.app_air.walletbasecontext.logger.Logger
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletbasecontext.utils.ApplicationContextHolder
 import org.mytonwallet.app_air.walletbasecontext.utils.toProcessedSpannableStringBuilder
+import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
 import org.mytonwallet.app_air.walletcore.api.activateAccount
 import org.mytonwallet.app_air.walletcore.constants.PossibleWords
 import org.mytonwallet.app_air.walletcore.models.MBridgeError
-import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
-import org.mytonwallet.app_air.walletbasecontext.logger.LogMessage
-import org.mytonwallet.app_air.walletbasecontext.logger.Logger
 import java.lang.ref.WeakReference
 import kotlin.math.max
 
 @SuppressLint("ViewConstructor")
 class ImportWalletVC(
     context: Context,
+    private val network: MBlockchainNetwork,
     // Used when adding new accounts. (not first mnemonic wallet)
     private val passedPasscode: String?
 ) :
     WViewController(context), WThemedView, ImportWalletVM.Delegate, WEditText.Delegate {
+    override val TAG = "ImportWallet"
 
     override val shouldDisplayTopBar = false
     override val ignoreSideGuttering = true
@@ -84,7 +88,7 @@ class ImportWalletVC(
     private val titleLabel: WLabel by lazy {
         val lbl = WLabel(context)
         lbl.text = LocaleController.getString("Enter Secret Words")
-        lbl.setStyle(28f, WFont.Medium)
+        lbl.setStyle(28f, WFont.SemiBold)
         lbl
     }
 
@@ -92,7 +96,17 @@ class ImportWalletVC(
         WLabel(context).apply {
             setStyle(16f)
             setLineHeight(TypedValue.COMPLEX_UNIT_SP, 24f)
-            text = LocaleController.getString("\$auth_import_mnemonic_description")
+            text = LocaleController.getStringWithKeyValues(
+                "\$auth_import_mnemonic_description",
+                listOf(
+                    Pair(
+                        "%counts%", LocaleController.getFormattedEnumeration(
+                            listOf("12", "24"),
+                            "or"
+                        )
+                    )
+                )
+            )
                 .toProcessedSpannableStringBuilder()
             textAlignment = TEXT_ALIGNMENT_CENTER
         }
@@ -192,7 +206,7 @@ class ImportWalletVC(
             toCenterX(pasteButton)
 
             val containerWidth = (navigationController?.width?.takeIf { it > 0 }
-                ?: context.resources.displayMetrics.widthPixels)
+                ?: ApplicationContextHolder.screenWidth)
             val wordInputWidth = (containerWidth - 64.dp - 16.dp) / 2
 
             var prevLeftWordInput: WWordInput? = null
@@ -260,7 +274,7 @@ class ImportWalletVC(
                 topReversedCornerView?.pauseBlurring(false)
             }
             if (y > scrollOffsetToShowNav) {
-                setNavTitle(LocaleController.getString("Enter Secret Words"))
+                setNavTitle(LocaleController.getString("Enter Secret Words") + network.localizedIdentifier)
                 setTopBlur(true, animated = true)
             } else {
                 setNavTitle("")
@@ -287,6 +301,7 @@ class ImportWalletVC(
             makeFieldVisible(activeField!!)
     }
 
+    override val isTinted = true
     override fun updateTheme() {
         scrollingContentView.setBackgroundColor(WColor.SecondaryBackground.color)
         titleLabel.setTextColor(WColor.PrimaryText.color)
@@ -343,12 +358,12 @@ class ImportWalletVC(
             continueButton.isLoading = false
             view.unlockView()
             push(SetPasscodeVC(context, true, null) { passcode, biometricsActivated ->
-                importWalletVM.finalizeAccount(window!!, words, passcode, biometricsActivated, 0)
+                importWalletVM.finalizeAccount(window!!, network, words, passcode, biometricsActivated, 0)
             }, onCompletion = {
                 navigationController?.removePrevViewControllers()
             })
         } else {
-            importWalletVM.finalizeAccount(window!!, words, passedPasscode, null, 0)
+            importWalletVM.finalizeAccount(window!!, network, words, passedPasscode, null, 0)
         }
     }
 
@@ -363,7 +378,7 @@ class ImportWalletVC(
                     Logger.LogTag.ACCOUNT,
                     LogMessage.Builder()
                         .append(
-                            "Activation failed on import finalization: $err",
+                            "activateAccount: Failed on import finalization err=$err",
                             LogMessage.MessagePartPrivacy.PUBLIC
                         ).build()
                 )

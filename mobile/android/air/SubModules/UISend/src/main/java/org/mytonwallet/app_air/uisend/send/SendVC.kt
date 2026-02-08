@@ -1,5 +1,6 @@
 package org.mytonwallet.app_air.uisend.send
 
+import android.animation.Animator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
@@ -8,31 +9,37 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextWatcher
 import android.util.TypedValue
-import android.view.View
+import android.view.Gravity
+import android.view.View.generateViewId
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Space
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.constraintlayout.widget.ConstraintLayout
-import androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_CONSTRAINT
+import androidx.constraintlayout.widget.Guideline
 import androidx.core.content.ContextCompat
 import androidx.core.view.isGone
+import androidx.core.view.isInvisible
+import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import org.mytonwallet.app_air.uicomponents.AnimationConstants
 import org.mytonwallet.app_air.uicomponents.adapter.implementation.holders.ListGapCell
-import org.mytonwallet.app_air.uicomponents.adapter.implementation.holders.ListTitleCell
 import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
 import org.mytonwallet.app_air.uicomponents.base.WViewControllerWithModelStore
 import org.mytonwallet.app_air.uicomponents.base.showAlert
 import org.mytonwallet.app_air.uicomponents.commonViews.AddressInputLayout
 import org.mytonwallet.app_air.uicomponents.commonViews.ReversedCornerViewUpsideDown
 import org.mytonwallet.app_air.uicomponents.commonViews.TokenAmountInputView
+import org.mytonwallet.app_air.uicomponents.commonViews.cells.HeaderCell
 import org.mytonwallet.app_air.uicomponents.commonViews.feeDetailsDialog.FeeDetailsDialog
-import org.mytonwallet.app_air.uicomponents.drawable.SeparatorBackgroundDrawable
+import org.mytonwallet.app_air.uicomponents.extensions.animatorSet
 import org.mytonwallet.app_air.uicomponents.extensions.collectFlow
 import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
@@ -43,18 +50,23 @@ import org.mytonwallet.app_air.uicomponents.viewControllers.SendTokenVC
 import org.mytonwallet.app_air.uicomponents.widgets.CopyTextView
 import org.mytonwallet.app_air.uicomponents.widgets.WAlertLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WButton
+import org.mytonwallet.app_air.uicomponents.widgets.WFrameLayout
+import org.mytonwallet.app_air.uicomponents.widgets.autoComplete.WAutoCompleteAddressView
 import org.mytonwallet.app_air.uicomponents.widgets.dialog.WDialog
 import org.mytonwallet.app_air.uicomponents.widgets.hideKeyboard
 import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup
+import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup.BackgroundStyle
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
+import org.mytonwallet.app_air.uicomponents.widgets.setRoundedOutline
 import org.mytonwallet.app_air.uicomponents.widgets.showKeyboard
+import org.mytonwallet.app_air.uicomponents.widgets.updateLayoutParamsIfExists
 import org.mytonwallet.app_air.uisend.send.helpers.ScamDetectionHelpers
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
-import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletcontext.helpers.WInterpolator
 import org.mytonwallet.app_air.walletcontext.utils.CoinUtils
 import org.mytonwallet.app_air.walletcontext.utils.VerticalImageSpan
 import org.mytonwallet.app_air.walletcore.JSWebViewBridge
@@ -73,6 +85,7 @@ import org.mytonwallet.app_air.walletcore.stores.TokenStore
 import java.lang.ref.WeakReference
 import java.math.BigInteger
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 @SuppressLint("ViewConstructor")
 class SendVC(
@@ -80,6 +93,11 @@ class SendVC(
     private val initialTokenSlug: String? = null,
     private val initialValues: InitialValues? = null,
 ) : WViewControllerWithModelStore(context), WalletCore.EventObserver {
+    override val TAG = "Send"
+
+    override val displayedAccount =
+        DisplayedAccount(AccountStore.activeAccountId, AccountStore.isPushedTemporary)
+
     private val viewModel by lazy { ViewModelProvider(this)[SendViewModel::class.java] }
 
     data class InitialValues(
@@ -90,37 +108,93 @@ class SendVC(
         val init: String? = null,
     )
 
-    private val topGapView = View(context).apply {
-        id = View.generateViewId()
+    private var suggestionAnimator: Animator? = null
+    private var showSuggestionAnimatorInProgress: Boolean = false
+    private val continueButtonHeightPx: Int = 50.dp
+    private val continueButtonVerticalMarginPx: Int = 15.dp
+    private val continueButtonSpaceHeightPx: Int =
+        continueButtonHeightPx + continueButtonVerticalMarginPx * 2
+
+    private val topGap = Space(context)
+
+    private val bottomGuideline = Guideline(context).apply {
+        id = generateViewId()
     }
 
-    private val title1 = ListTitleCell(context).apply {
-        id = View.generateViewId()
-        text = LocaleController.getString("Send to")
+    private val title1: HeaderCell by lazy {
+        HeaderCell(context).apply {
+            configure(
+                title = LocaleController.getString("Send to"),
+                titleColor = WColor.Tint,
+                topRounding = HeaderCell.TopRounding.FIRST_ITEM
+            )
+        }
     }
 
-    private val gap1 by lazy { ListGapCell(context, ViewConstants.GAP.dp) }
+    private val gap1 by lazy { Space(context) }
 
     private val amountInputView by lazy {
-        TokenAmountInputView(context).apply {
-            id = View.generateViewId()
+        TokenAmountInputView(context, isFirstItem = false).apply {
+            id = generateViewId()
         }
     }
     private val addressInputView by lazy {
         AddressInputLayout(
             WeakReference(this),
-            onTextEntered = {
-                amountInputView.amountEditText.requestFocus()
-                amountInputView.amountEditText.showKeyboard()
+            AddressInputLayout.AutoCompleteConfig(
+                type = AddressInputLayout.AutoCompleteConfig.Type.EXTERNAL
+            ),
+            onTextEntered = { keyword ->
+                hideSuggestions()
+                focusAmount()
+                suggestionsBoxView.search(keyword, true)
             }).apply {
-            id = View.generateViewId()
+            id = generateViewId()
+            showCloseOnTextEditing = true
+            focusCallback = { hasFocus ->
+                if (hasFocus) {
+                    showSuggestions()
+                    suggestionsBoxView.search(getKeyword())
+                }
+            }
+            addTextChangedListener { input ->
+                suggestionsBoxView.search(input)
+            }
+            textFieldTopPadding = 19.dp
+            textFieldBottomPadding = 14.dp
+        }
+    }
+
+    private val suggestionsBoxView: WAutoCompleteAddressView by lazy {
+        WAutoCompleteAddressView(context).apply {
+            autoCompleteConfig = AddressInputLayout.AutoCompleteConfig(
+                type = AddressInputLayout.AutoCompleteConfig.Type.EXTERNAL
+            )
+            search("")
+            isGone = true
+            setRoundedOutline(ViewConstants.BIG_RADIUS.dp)
+            onSelected = { account, savedAddress ->
+                when {
+                    account != null -> {
+                        addressInputView.setAccount(account)
+                        hideSuggestions()
+                        focusAmount()
+                    }
+
+                    savedAddress != null -> {
+                        addressInputView.setAddress(savedAddress)
+                        hideSuggestions()
+                        focusAmount()
+                    }
+                }
+            }
+            viewController = WeakReference(this@SendVC)
         }
     }
 
     private val gap2 by lazy { ListGapCell(context, ViewConstants.GAP.dp) }
 
-    private val title2 = ListTitleCell(context).apply {
-        id = View.generateViewId()
+    private val title2 = HeaderCell(context).apply {
         setOnClickListener {
             if (AccountStore.activeAccount?.supportsCommentEncryption != true)
                 return@setOnClickListener
@@ -143,22 +217,29 @@ class SendVC(
                         viewModel.onShouldEncrypt(true)
                         updateCommentTitleLabel()
                     }),
-                offset = if (LocaleController.isRTL) width - 190.dp else 20.dp,
+                xOffset = 0,
+                yOffset = 5.dp,
                 popupWidth = WRAP_CONTENT,
-                aboveView = false
+                positioning = WMenuPopup.Positioning.BELOW,
+                windowBackgroundStyle = BackgroundStyle.Cutout.fromView(
+                    titleLabel,
+                    roundRadius = 16f.dp,
+                    horizontalOffset = 8.dp,
+                    verticalOffset = 5.dp
+                )
             )
         }
     }
 
     private val commentInputView by lazy {
         AppCompatEditText(context).apply {
-            id = View.generateViewId()
+            id = generateViewId()
             background = null
             hint = LocaleController.getString("Add a message, if needed")
             typeface = WFont.Regular.typeface
             layoutParams =
                 ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-            setPaddingDp(20, 8, 20, 20)
+            setPaddingDp(20, 20, 20, 14)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 setLineHeight(TypedValue.COMPLEX_UNIT_SP, 24f)
@@ -180,21 +261,24 @@ class SendVC(
     private val binaryMessageGap by lazy { ListGapCell(context, ViewConstants.GAP.dp) }
 
     private val binaryMessageTitle by lazy {
-        ListTitleCell(context).apply {
-            id = View.generateViewId()
-            text = LocaleController.getString("Signing Data")
+        HeaderCell(context).apply {
+            configure(
+                title = LocaleController.getString("Signing Data"),
+                titleColor = WColor.Tint,
+                topRounding = HeaderCell.TopRounding.FIRST_ITEM
+            )
         }
     }
 
     private val binaryMessageView by lazy {
         CopyTextView(context).apply {
-            id = View.generateViewId()
+            id = generateViewId()
             typeface = WFont.Regular.typeface
             layoutParams = LinearLayout.LayoutParams(
                 MATCH_PARENT,
                 WRAP_CONTENT
             )
-            setPaddingDp(20, 8, 20, 20)
+            setPaddingDp(20, 14, 20, 14)
 
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             setLineHeight(TypedValue.COMPLEX_UNIT_SP, 24f)
@@ -207,21 +291,24 @@ class SendVC(
     private val initDataGap by lazy { ListGapCell(context, ViewConstants.GAP.dp) }
 
     private val initDataTitle by lazy {
-        ListTitleCell(context).apply {
-            id = View.generateViewId()
-            text = LocaleController.getString("Contract Initialization Data")
+        HeaderCell(context).apply {
+            configure(
+                title = LocaleController.getString("Contract Initialization Data"),
+                titleColor = WColor.Tint,
+                topRounding = HeaderCell.TopRounding.FIRST_ITEM
+            )
         }
     }
 
     private val initDataView by lazy {
         CopyTextView(context).apply {
-            id = View.generateViewId()
+            id = generateViewId()
             typeface = WFont.Regular.typeface
             layoutParams = LinearLayout.LayoutParams(
                 MATCH_PARENT,
                 WRAP_CONTENT
             )
-            setPaddingDp(20, 8, 20, 20)
+            setPaddingDp(20, 14, 20, 14)
 
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             setLineHeight(TypedValue.COMPLEX_UNIT_SP, 24f)
@@ -231,7 +318,28 @@ class SendVC(
         }
     }
 
-    private val linearLayout by lazy {
+    private val headerContentContainer by lazy {
+        LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+
+            addView(
+                topGap,
+                ViewGroup.LayoutParams(
+                    MATCH_PARENT,
+                    (navigationController?.getSystemBars()?.top ?: 0) +
+                        WNavigationBar.DEFAULT_HEIGHT.dp
+                )
+            )
+            addView(title1, ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(
+                addressInputView,
+                LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            )
+            addView(gap1, ViewGroup.LayoutParams(WRAP_CONTENT, ViewConstants.GAP.dp))
+        }
+    }
+
+    private val primaryContent by lazy {
         LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
 
@@ -239,29 +347,15 @@ class SendVC(
             val hasInit = initialValues?.init != null
 
             addView(
-                topGapView,
-                ConstraintLayout.LayoutParams(
-                    MATCH_PARENT,
-                    (navigationController?.getSystemBars()?.top ?: 0) +
-                        WNavigationBar.DEFAULT_HEIGHT.dp
-                )
-            )
-            addView(title1)
-            addView(
-                addressInputView,
-                ConstraintLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-            )
-            addView(gap1)
-            addView(
                 amountInputView,
                 ConstraintLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
             )
             if (!hasBinary) {
                 addView(gap2)
-                addView(title2)
+                addView(title2, ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 addView(
                     commentInputView,
-                    ConstraintLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+                    ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
                 )
             }
             if (hasBinary) {
@@ -280,16 +374,36 @@ class SendVC(
         }
     }
 
+    private val dynamicContentContainer: WFrameLayout by lazy {
+        WFrameLayout(context).apply {
+            clipChildren = false
+            addView(primaryContent, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(suggestionsBoxView, LinearLayout.LayoutParams(MATCH_PARENT, 0))
+        }
+    }
+
+    private val linearLayout by lazy {
+        LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            addView(headerContentContainer, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(dynamicContentContainer, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+    }
+
     private val scrollView by lazy {
         ScrollView(context).apply {
             addView(
                 linearLayout,
                 ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
             )
-            id = View.generateViewId()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                setOnScrollChangeListener { _, _, scrollY, _, _ ->
-                    updateBlurViews(scrollView = this, computedOffset = scrollY)
+            id = generateViewId()
+            setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                updateBlurViews(scrollView = this, computedOffset = scrollY)
+                if (scrollY > 0) {
+                    bottomReversedCornerViewUpsideDown.resumeBlurring()
+                } else {
+                    bottomReversedCornerViewUpsideDown.pauseBlurring()
                 }
             }
             overScrollMode = ScrollView.OVER_SCROLL_ALWAYS
@@ -299,15 +413,23 @@ class SendVC(
 
     private val continueButton by lazy {
         WButton(context).apply {
-            id = View.generateViewId()
+            id = generateViewId()
         }
     }
 
-    private val bottomReversedCornerViewUpsideDown: ReversedCornerViewUpsideDown =
-        ReversedCornerViewUpsideDown(context, scrollView).apply {
-            if (ignoreSideGuttering)
-                setHorizontalPadding(0f)
+    private val continueButtonSpace by lazy {
+        Space(context).apply {
+            id = generateViewId()
         }
+    }
+
+    private val bottomReversedCornerViewUpsideDown: ReversedCornerViewUpsideDown by lazy {
+        ReversedCornerViewUpsideDown(context, scrollView).apply {
+            if (ignoreSideGuttering) {
+                setHorizontalPadding(0f)
+            }
+        }
+    }
 
     private val onInputCommentTextWatcher = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -338,7 +460,200 @@ class SendVC(
         override fun afterTextChanged(s: Editable?) {}
     }
 
-    private var sentActivityId: String? = null
+    private fun focusAmount() {
+        amountInputView.amountEditText.requestFocus()
+        amountInputView.amountEditText.showKeyboard()
+    }
+
+    override fun onBackPressed(): Boolean {
+        if (addressInputView.inputFieldHasFocus()) {
+            addressInputView.resetInputFieldFocus()
+            hideSuggestions()
+            return false
+        }
+        if (suggestionsBoxView.isVisible) {
+            hideSuggestions()
+            return false
+        }
+        return super.onBackPressed()
+    }
+
+    private fun showSuggestions() {
+        if (!suggestionsBoxView.isEnabled) {
+            return
+        }
+        if (primaryContent.isGone && suggestionsBoxView.isVisible) {
+            return
+        }
+        suggestionAnimator?.cancel()
+        navigationBar?.fadeInActions()
+        val dy = 32f.dp
+        with(primaryContent) {
+            isVisible = true
+            alpha = 1f
+            translationY = 0f
+        }
+        with(suggestionsBoxView) {
+            isVisible = true
+            alpha = 0f
+            translationY = -dy
+        }
+        with(continueButton) {
+            isVisible = true
+            alpha = 1f
+            translationY = 0f
+        }
+        continueButtonSpace.updateLayoutParams {
+            height = continueButtonSpaceHeightPx
+        }
+        updateBottomOffsets(true)
+        val onEnd = {
+            with(primaryContent) {
+                isGone = true
+                alpha = 0f
+                translationY = dy
+            }
+            with(suggestionsBoxView) {
+                alpha = 1f
+                translationY = 0f
+            }
+            with(continueButton) {
+                isGone = true
+                alpha = 0f
+                translationY = continueButtonSpaceHeightPx.toFloat()
+            }
+            continueButtonSpace.updateLayoutParams {
+                height = 1
+            }
+            updateBottomOffsets(false)
+            scrollView.scrollTo(0, 0)
+            showSuggestionAnimatorInProgress = false
+            insetsUpdated()
+        }
+        if (!WGlobalStorage.getAreAnimationsActive()) {
+            onEnd()
+            return
+        }
+        showSuggestionAnimatorInProgress = true
+        val cornerViewDiff = getBottomReversedCornerViewUpsideDownHeight(true) -
+            getBottomReversedCornerViewUpsideDownHeight(false)
+        suggestionAnimator = animatorSet {
+            together {
+                duration(AnimationConstants.NAV_PUSH)
+                interpolator(WInterpolator.emphasized)
+                viewProperty(primaryContent) {
+                    alpha(0f)
+                    translationY(dy)
+                }
+                viewProperty(suggestionsBoxView) {
+                    alpha(1f)
+                    translationY(0f)
+                }
+                viewProperty(continueButton) {
+                    alpha(0f)
+                    translationY(continueButtonSpaceHeightPx.toFloat())
+                }
+                intValues(scrollView.scrollY, 0) {
+                    onUpdate { animatedValue ->
+                        scrollView.scrollTo(0, animatedValue)
+                    }
+                }
+                intValues(continueButtonSpace.height, 1) {
+                    onUpdate { animatedValue ->
+                        continueButtonSpace.updateLayoutParams { height = animatedValue }
+                    }
+                }
+                intValues(cornerViewDiff, 0) {
+                    onUpdate { animatedValue -> updateBottomOffsets(false, animatedValue) }
+                }
+            }
+            onEnd { onEnd() }
+        }.apply { start() }
+    }
+
+    private fun hideSuggestions() {
+        if (!suggestionsBoxView.isEnabled) {
+            return
+        }
+        if (primaryContent.isVisible && suggestionsBoxView.isInvisible) {
+            return
+        }
+        navigationBar?.fadeOutActions()
+        suggestionAnimator?.cancel()
+        val dy = 32f.dp
+        with(primaryContent) {
+            isVisible = true
+            alpha = 0f
+            translationY = dy
+        }
+        with(suggestionsBoxView) {
+            isVisible = true
+            alpha = 1f
+            translationY = 0f
+        }
+        with(continueButton) {
+            isVisible = true
+            alpha = 0f
+            translationY = continueButtonSpaceHeightPx.toFloat()
+        }
+        continueButtonSpace.updateLayoutParams {
+            height = 1
+        }
+        updateBottomOffsets(false)
+        val onEnd = {
+            with(primaryContent) {
+                alpha = 1f
+                translationY = 0f
+            }
+            with(suggestionsBoxView) {
+                isGone = true
+                alpha = 0f
+                translationY = -dy
+            }
+            with(continueButton) {
+                alpha = 1f
+                translationY = 0f
+            }
+            continueButtonSpace.updateLayoutParams {
+                height = continueButtonSpaceHeightPx
+            }
+            updateBottomOffsets(true)
+            continueButton.translationY = 0f
+        }
+        if (!WGlobalStorage.getAreAnimationsActive()) {
+            onEnd()
+            return
+        }
+        val cornerViewDiff = getBottomReversedCornerViewUpsideDownHeight(true) -
+            getBottomReversedCornerViewUpsideDownHeight(false)
+        suggestionAnimator = animatorSet {
+            together {
+                duration(AnimationConstants.NAV_PUSH)
+                interpolator(WInterpolator.emphasized)
+                viewProperty(primaryContent) {
+                    alpha(1f)
+                    translationY(0f)
+                }
+                viewProperty(suggestionsBoxView) {
+                    alpha(0f)
+                    translationY(-dy)
+                }
+                viewProperty(continueButton) {
+                    alpha(1f)
+                    translationY(0f)
+                }
+                intValues(0, continueButtonSpaceHeightPx) {
+                    onUpdate { animatedValue ->
+                        continueButtonSpace.updateLayoutParams { height = animatedValue }
+                    }
+                }
+                intValues(0, cornerViewDiff) {
+                    onUpdate { animatedValue -> updateBottomOffsets(false, animatedValue) }
+                }
+            }
+            onEnd { onEnd() }
+        }.apply { start() }
+    }
 
     override fun setupViews() {
         super.setupViews()
@@ -348,33 +663,39 @@ class SendVC(
         setNavTitle(LocaleController.getString("\$send_action"))
         setupNavBar(true)
         navigationBar?.addCloseButton()
+        navigationBar?.setTitleGravity(Gravity.CENTER)
 
+        view.addHorizontalGuideline(bottomGuideline)
         view.addView(scrollView, ViewGroup.LayoutParams(MATCH_PARENT, 0))
         view.addView(
             bottomReversedCornerViewUpsideDown,
-            ConstraintLayout.LayoutParams(
+            FrameLayout.LayoutParams(
                 MATCH_PARENT,
-                MATCH_CONSTRAINT
-            )
+                getBottomReversedCornerViewUpsideDownHeight()
+            ).apply {
+                gravity = Gravity.BOTTOM
+            }
         )
-        view.addView(continueButton, ViewGroup.LayoutParams(MATCH_PARENT, 50.dp))
+        scrollView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val suggestionsBoxHeight =
+                (scrollView.height - linearLayout.paddingBottom) - headerContentContainer.height
+            if (suggestionsBoxView.layoutParams.height != suggestionsBoxHeight) {
+                suggestionsBoxView.updateLayoutParams { height = suggestionsBoxHeight }
+            }
+        }
+        view.addView(
+            continueButtonSpace, ViewGroup.LayoutParams(MATCH_PARENT, continueButtonSpaceHeightPx)
+        )
+        view.addView(continueButton, ViewGroup.LayoutParams(MATCH_PARENT, continueButtonHeightPx))
         view.setConstraints {
-            toCenterX(scrollView)
-            toTop(scrollView)
-            bottomToTop(scrollView, continueButton, 20f)
-            toCenterX(continueButton, 20f)
-            toBottomPx(
-                continueButton, 20.dp + max(
-                    (navigationController?.getSystemBars()?.bottom ?: 0),
-                    (window?.imeInsets?.bottom ?: 0)
-                )
-            )
-            topToTop(
-                bottomReversedCornerViewUpsideDown,
-                continueButton,
-                -20f - ViewConstants.BIG_RADIUS
-            )
+            allEdges(scrollView)
+            toCenterX(bottomReversedCornerViewUpsideDown)
             toBottom(bottomReversedCornerViewUpsideDown)
+            bottomToTop(continueButtonSpace, bottomGuideline)
+            toCenterX(continueButtonSpace)
+            toCenterX(continueButton, 20f)
+            bottomToTopPx(continueButton, bottomGuideline, continueButtonVerticalMarginPx)
+            guidelineEndPx(bottomGuideline, getSystemBottomOffset())
         }
 
         initialTokenSlug?.let {
@@ -406,6 +727,10 @@ class SendVC(
                                 val id = viewModel.callSend(config, passcode!!).activityId
                                 sentActivityId = ActivityHelpers.getTxIdFromId(id)
                                 // Wait for Pending Activity event...
+                                receivedLocalActivities?.firstOrNull { it.getTxHash() == sentActivityId }
+                                    ?.let {
+                                        checkReceivedActivity(it)
+                                    }
                             } catch (e: JSWebViewBridge.ApiError) {
                                 navigationController?.viewControllers[navigationController!!.viewControllers.size - 2]?.showError(
                                     e.parsed
@@ -444,6 +769,9 @@ class SendVC(
         amountInputView.tokenSelectorView.setOnClickListener {
             push(SendTokenVC(context).apply {
                 setOnAssetSelectListener {
+                    MBlockchain.valueOfSlugOrNull(it.slug)?.let { blockchain ->
+                        addressInputView.activeChain = blockchain
+                    }
                     viewModel.onInputToken(it.slug)
                     updateCommentViews()
                     showServiceTokenWarningIfRequired()
@@ -472,6 +800,7 @@ class SendVC(
             if (it.uiButton.status == SendViewModel.ButtonStatus.NotEnoughNativeToken) {
                 showScamWarningIfRequired()
             }
+            suggestionsBoxView.isEnabled = it.uiAddressSearch.enabled
         }
 
         collectFlow(viewModel.uiEventFlow) { event ->
@@ -489,29 +818,22 @@ class SendVC(
     override fun updateTheme() {
         super.updateTheme()
         view.setBackgroundColor(WColor.SecondaryBackground.color)
-        title1.setBackgroundColor(WColor.Background.color, ViewConstants.TOP_RADIUS.dp, 0f)
-        listOf(title2, binaryMessageTitle, initDataTitle).forEach {
+        listOf(binaryMessageTitle, initDataTitle).forEach {
             it.setBackgroundColor(
                 WColor.Background.color,
                 ViewConstants.BIG_RADIUS.dp,
                 0f,
             )
         }
+        title1.updateTheme()
+        title2.updateTheme()
         val dataViews = listOf(addressInputView, commentInputView, binaryMessageView, initDataView)
-        if (ThemeManager.uiMode.hasRoundedCorners) {
-            dataViews.forEach {
-                it.setBackgroundColor(
-                    WColor.Background.color,
-                    0f,
-                    ViewConstants.BIG_RADIUS.dp
-                )
-            }
-        } else {
-            dataViews.forEach {
-                it.background = SeparatorBackgroundDrawable().apply {
-                    backgroundWColor = WColor.Background
-                }
-            }
+        dataViews.forEach {
+            it.setBackgroundColor(
+                WColor.Background.color,
+                0f,
+                ViewConstants.BIG_RADIUS.dp
+            )
         }
         commentInputView.setTextColor(WColor.PrimaryText.color)
         commentInputView.setHintTextColor(WColor.SecondaryText.color)
@@ -522,7 +844,11 @@ class SendVC(
     private fun updateCommentTitleLabel() {
         title2.apply {
             if (AccountStore.activeAccount?.supportsCommentEncryption == false) {
-                text = LocaleController.getString("Comment or Memo")
+                configure(
+                    title = LocaleController.getString("Comment or Memo"),
+                    titleColor = WColor.Tint,
+                    topRounding = HeaderCell.TopRounding.FIRST_ITEM
+                )
                 return@apply
             }
             val txt =
@@ -533,14 +859,18 @@ class SendVC(
                 org.mytonwallet.app_air.icons.R.drawable.ic_arrow_bottom_8
             )?.let { drawable ->
                 drawable.mutate()
-                drawable.setTint(WColor.PrimaryText.color)
+                drawable.setTint(WColor.Tint.color)
                 val width = 8.dp
                 val height = 4.dp
                 drawable.setBounds(0, 0, width, height)
                 val imageSpan = VerticalImageSpan(drawable)
                 ss.append(" ", imageSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            text = ss
+            configure(
+                title = ss,
+                titleColor = WColor.Tint,
+                topRounding = HeaderCell.TopRounding.FIRST_ITEM
+            )
         }
     }
 
@@ -576,6 +906,34 @@ class SendVC(
         }
     }
 
+    private fun getSystemBottomOffset(): Int {
+        return max(
+            (navigationController?.getSystemBars()?.bottom ?: 0),
+            (window?.imeInsets?.bottom ?: 0)
+        )
+    }
+
+    private fun getScrollViewBottomMargin(buttonVisible: Boolean = true): Int {
+        val system = getSystemBottomOffset()
+        val button = if (buttonVisible) {
+            continueButtonSpaceHeightPx
+        } else {
+            0
+        }
+        return system + button
+    }
+
+    private fun getBottomReversedCornerViewUpsideDownHeight(buttonVisible: Boolean = true): Int {
+        val system = getSystemBottomOffset()
+        val button = if (buttonVisible) {
+            continueButtonSpaceHeightPx
+        } else {
+            ViewConstants.GAP.dp
+        }
+        val radius = ViewConstants.BIG_RADIUS.dp.roundToInt()
+        return system + button + radius
+    }
+
     override fun insetsUpdated() {
         super.insetsUpdated()
         scrollView.setPadding(
@@ -584,19 +942,25 @@ class SendVC(
             ViewConstants.HORIZONTAL_PADDINGS.dp,
             0
         )
-        topGapView.updateLayoutParams {
+        topGap.updateLayoutParamsIfExists {
             height = (navigationController?.getSystemBars()?.top ?: 0) +
                 WNavigationBar.DEFAULT_HEIGHT.dp
         }
-        view.setConstraints {
-            toBottomPx(
-                continueButton, 20.dp + max(
-                    (navigationController?.getSystemBars()?.bottom ?: 0),
-                    (window?.imeInsets?.bottom ?: 0)
-                )
-            )
-        }
         addressInputView.insetsUpdated()
+        if (showSuggestionAnimatorInProgress) {
+            return
+        }
+        updateBottomOffsets(continueButton.isVisible)
+        view.setConstraints {
+            guidelineEndPx(bottomGuideline, getSystemBottomOffset())
+        }
+    }
+
+    private fun updateBottomOffsets(buttonVisible: Boolean, extraSize: Int = 0) {
+        bottomReversedCornerViewUpsideDown.updateLayoutParamsIfExists {
+            height = getBottomReversedCornerViewUpsideDownHeight(buttonVisible) + extraSize
+        }
+        linearLayout.setPadding(0, 0, 0, getScrollViewBottomMargin(buttonVisible) + extraSize)
     }
 
     private fun updateCommentViews() {
@@ -617,7 +981,7 @@ class SendVC(
                 showAlert(
                     LocaleController.getString("Warning!"),
                     ScamDetectionHelpers.scamWarningMessage(),
-                    button = LocaleController.getString("Got it"),
+                    button = LocaleController.getString("Got It"),
                     primaryIsDanger = true,
                     allowLinkInText = true
                 )
@@ -638,7 +1002,7 @@ class SendVC(
             showAlert(
                 LocaleController.getString("Warning!"),
                 LocaleController.getString("\$service_token_transfer_warning"),
-                button = LocaleController.getString("Got it"),
+                button = LocaleController.getString("Got It"),
                 primaryIsDanger = true
             )
     }
@@ -670,19 +1034,57 @@ class SendVC(
         }
     }
 
-    override fun onWalletEvent(walletEvent: WalletEvent) {
-        val sentActivityId = sentActivityId ?: return
-        when (walletEvent) {
-            is WalletEvent.ReceivedPendingActivities -> {
-                val activity = walletEvent.pendingActivities?.firstOrNull { activity ->
-                    activity is MApiTransaction.Transaction &&
-                        sentActivityId == activity.getTxHash()
-                } ?: return
+    private var sentActivityId: String? = null
+    private var receivedLocalActivities: ArrayList<MApiTransaction>? = null
+    private fun checkReceivedActivity(receivedActivity: MApiTransaction) {
+        if (sentActivityId == null) {
+            // Send in-progress, cached received local activity to process on send api callback is called
+            if (receivedActivity.isLocal()) {
+                if (receivedLocalActivities == null)
+                    receivedLocalActivities = ArrayList()
+                receivedLocalActivities?.add(receivedActivity)
+            }
+            return
+        }
 
-                this.sentActivityId = null
-                window?.dismissLastNav {
-                    WalletCore.notifyEvent(WalletEvent.OpenActivity(activity))
+        val txMatch =
+            receivedActivity is MApiTransaction.Transaction && sentActivityId == receivedActivity.getTxHash()
+        if (!txMatch) {
+            return
+        }
+
+        sentActivityId = null
+        WalletCore.unregisterObserver(this)
+        if (window?.topNavigationController != navigationController) {
+            window?.dismissNav(navigationController)
+            return
+        }
+        window?.dismissLastNav {
+            WalletCore.notifyEvent(
+                WalletEvent.OpenActivity(
+                    displayedAccount.accountId!!,
+                    receivedActivity
+                )
+            )
+        }
+    }
+
+    override fun onWalletEvent(walletEvent: WalletEvent) {
+        when (walletEvent) {
+            is WalletEvent.NewLocalActivities -> {
+                walletEvent.localActivities?.forEach {
+                    checkReceivedActivity(it)
                 }
+            }
+
+            is WalletEvent.ReceivedPendingActivities -> {
+                walletEvent.pendingActivities?.forEach {
+                    checkReceivedActivity(it)
+                }
+            }
+
+            is WalletEvent.AccountSavedAddressesChanged -> {
+                suggestionsBoxView.search(addressInputView.getKeyword())
             }
 
             else -> {}

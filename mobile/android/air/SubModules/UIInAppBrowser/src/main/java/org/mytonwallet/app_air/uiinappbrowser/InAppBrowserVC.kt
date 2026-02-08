@@ -1,6 +1,7 @@
 package org.mytonwallet.app_air.uiinappbrowser
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -8,19 +9,22 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.core.animation.doOnEnd
 import androidx.core.content.ContextCompat.checkSelfPermission
+import androidx.core.graphics.toColorInt
 import androidx.core.net.toUri
 import org.mytonwallet.app_air.uicomponents.AnimationConstants
 import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
@@ -30,16 +34,20 @@ import org.mytonwallet.app_air.uicomponents.base.WWindow
 import org.mytonwallet.app_air.uicomponents.base.showAlert
 import org.mytonwallet.app_air.uicomponents.extensions.asImage
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import org.mytonwallet.app_air.uicomponents.widgets.WFrameLayout
 import org.mytonwallet.app_air.uicomponents.widgets.fadeIn
 import org.mytonwallet.app_air.uiinappbrowser.helpers.IABDarkModeStyleHelpers
 import org.mytonwallet.app_air.uiinappbrowser.views.InAppBrowserTopBarView
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletbasecontext.utils.isBrightColor
+import org.mytonwallet.app_air.walletcontext.WalletContextManager
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
 import org.mytonwallet.app_air.walletcore.helpers.TonConnectHelper
 import org.mytonwallet.app_air.walletcore.helpers.TonConnectInjectedInterface
+import org.mytonwallet.app_air.walletcore.models.IInAppBrowser
 import org.mytonwallet.app_air.walletcore.models.InAppBrowserConfig
 import org.mytonwallet.app_air.walletcore.models.MExploreHistory
 import org.mytonwallet.app_air.walletcore.stores.AccountStore
@@ -49,13 +57,75 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.regex.Pattern
 
+const val FETCH_FAV_ICON_URL_JS = """
+(function() {
+    function absoluteUrl(url) {
+        try { return new URL(url, document.baseURI).href; }
+        catch (e) { return url; }
+    }
+
+    var links = Array.from(document.querySelectorAll(
+        'link[rel*="icon"], link[rel="mask-icon"], link[rel="apple-touch-icon"]'
+    ));
+    if (links.length === 0) {
+        return absoluteUrl('/favicon.ico');
+    }
+
+    var best = links.map(link => {
+        let sizes = link.getAttribute('sizes');
+        let size = 0;
+        if (sizes && /\d+x\d+/.test(sizes)) {
+            size = parseInt(sizes.split('x')[0]);
+        } else if (link.rel.includes('apple-touch-icon')) {
+            size = 180;
+        } else {
+            size = 16;
+        }
+        return { href: absoluteUrl(link.href), size };
+    }).sort((a, b) => b.size - a.size)[0];
+    return best ? best.href : null;
+})();
+"""
+
+private const val FETCH_HEADER_COLOR_JS = """
+(function () {
+  function rgbToHex(color) {
+    if (!color) return null;
+
+    if (color.startsWith('#')) {
+      return color.toLowerCase();
+    }
+
+    const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (!match) return null;
+
+    const r = parseInt(match[1]).toString(16).padStart(2, '0');
+    const g = parseInt(match[2]).toString(16).padStart(2, '0');
+    const b = parseInt(match[3]).toString(16).padStart(2, '0');
+
+    return '#' + r + g + b;
+  }
+
+  const theme = document.querySelector('meta[name="theme-color"]')?.content;
+  if (theme) return rgbToHex(theme);
+
+  const nav = document.querySelector('header, nav, .navbar, body, html');
+  if (nav) {
+    const bg = getComputedStyle(nav).backgroundColor;
+    return rgbToHex(bg);
+  }
+
+  return null;
+})();
+"""
 
 @SuppressLint("ViewConstructor")
 class InAppBrowserVC(
     context: Context,
     private val tabBarController: WNavigationController.ITabBarController?,
     val config: InAppBrowserConfig
-) : WViewController(context), WalletCore.EventObserver {
+) : WViewController(context), IInAppBrowser, WalletCore.EventObserver {
+    override val TAG = "InAppBrowser"
 
     private var lastTitle: String = config.title ?: URL(config.url).host
 
@@ -66,17 +136,22 @@ class InAppBrowserVC(
         get() = topBar
 
     private var savedInExploreVisitedHistory = false
+    private var shouldClearHistoryOnLoad = false
 
     private val topBar: InAppBrowserTopBarView by lazy {
         InAppBrowserTopBarView(
-            this, tabBarController, minimizeStarted = {
+            this, tabBarController,
+            options = config.options,
+            selectedOption = config.selectedOption,
+            optionsOnTitle = config.optionsOnTitle,
+            minimizeStarted = {
+                updateSystemBarColors()
                 webViewScreenShot.setImageBitmap(webViewContainer.asImage())
                 webViewScreenShot.visibility = View.VISIBLE
                 webView.visibility = View.GONE
             },
-            options = config.options,
-            selectedOption = config.selectedOption,
             maximizeFinished = {
+                updateSystemBarColors()
                 view.post {
                     webView.visibility = View.VISIBLE
                     webView.post {
@@ -113,6 +188,7 @@ class InAppBrowserVC(
         wv.id = View.generateViewId()
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
+        wv.settings.setSupportMultipleWindows(true)
         wv.setWebViewClient(object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
@@ -136,6 +212,10 @@ class InAppBrowserVC(
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                if (shouldClearHistoryOnLoad) {
+                    shouldClearHistoryOnLoad = false
+                    webView.clearHistory()
+                }
                 topBar.updateBackButton(true)
                 // Prev method call may not work sometimes, so let's reset dark mode styles.
                 if (config.injectDarkModeStyles)
@@ -145,6 +225,7 @@ class InAppBrowserVC(
                     savedInExploreVisitedHistory = true
                     saveInExploreVisitedHistory()
                 }
+                setBarColorBasedOnContent()
             }
 
             private fun shouldOverride(url: String): Boolean {
@@ -191,11 +272,15 @@ class InAppBrowserVC(
                         return true
                     } catch (_: android.content.ActivityNotFoundException) {
                     }
+                } else {
+                    val isValidDeeplink = WalletContextManager.delegate?.handleDeeplink(url)
+                    if (isValidDeeplink == true)
+                        return true
                 }
 
                 if (!url.startsWith("http://") &&
                     !url.startsWith("https://") &&
-                    canHandleExternalUrl(url)
+                    return canHandleExternalUrl(url)
                 ) {
                     val intent = Intent(Intent.ACTION_VIEW)
                     intent.setData(Uri.parse(url))
@@ -208,6 +293,20 @@ class InAppBrowserVC(
         })
         wv.setBackgroundColor(0)
         wv.setWebChromeClient(object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?
+            ): Boolean {
+                val href = view?.handler?.obtainMessage()
+                view?.requestFocusNodeHref(href)
+                href?.data?.getString("url")?.let { url ->
+                    webView.loadUrl(url)
+                }
+                return true
+            }
+
             override fun onPermissionRequest(request: PermissionRequest?) {
                 request?.let {
                     handlePermissionRequest(it)
@@ -216,7 +315,7 @@ class InAppBrowserVC(
 
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 super.onReceivedTitle(view, title)
-                if (config.title != null || title == lastTitle)
+                if (config.title != null || title == lastTitle || config.options != null)
                     return
                 lastTitle = title ?: URL(config.url).host
                 topBar.updateTitle(lastTitle, animated = true)
@@ -253,8 +352,7 @@ class InAppBrowserVC(
         }
     }
 
-    private val webViewContainer = FrameLayout(context).apply {
-        id = View.generateViewId()
+    private val webViewContainer = WFrameLayout(context).apply {
         addView(webView, ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     }
 
@@ -282,9 +380,9 @@ class InAppBrowserVC(
         WalletCore.registerObserver(this)
     }
 
-    fun navigate(url: String) {
+    override fun navigate(url: String) {
+        shouldClearHistoryOnLoad = true
         webView.loadUrl(url)
-        webView.clearHistory()
     }
 
     private var isFirstAppearance = true
@@ -296,15 +394,21 @@ class InAppBrowserVC(
             webView.visibility = View.VISIBLE
             webView.fadeIn(AnimationConstants.VERY_QUICK_ANIMATION)
         }
+    }
+
+    override fun viewDidEnterForeground() {
+        super.viewDidEnterForeground()
 
         webView.visibility = View.VISIBLE
         webView.post {
             webViewScreenShot.visibility = View.GONE
         }
+        updateSystemBarColors()
     }
 
     override fun viewWillDisappear() {
         super.viewWillDisappear()
+        updateSystemBarColors()
         webViewScreenShot.setImageBitmap(webViewContainer.asImage())
         webViewScreenShot.visibility = View.VISIBLE
         webView.visibility = View.GONE
@@ -321,6 +425,11 @@ class InAppBrowserVC(
         super.insetsUpdated()
         topReversedCornerView?.setHorizontalPadding(0f)
         bottomReversedCornerView?.setHorizontalPadding(0f)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        webView.destroy()
     }
 
     private fun addWebView() {
@@ -356,37 +465,7 @@ class InAppBrowserVC(
     }
 
     private fun saveInExploreVisitedHistory() {
-        val fetchFavIconUrl = """
-    (function() {
-        function absoluteUrl(url) {
-            try { return new URL(url, document.baseURI).href; }
-            catch (e) { return url; }
-        }
-
-        var links = Array.from(document.querySelectorAll(
-            'link[rel*="icon"], link[rel="mask-icon"], link[rel="apple-touch-icon"]'
-        ));
-        if (links.length === 0) {
-            return absoluteUrl('/favicon.ico');
-        }
-
-        var best = links.map(link => {
-            let sizes = link.getAttribute('sizes');
-            let size = 0;
-            if (sizes && /\d+x\d+/.test(sizes)) {
-                size = parseInt(sizes.split('x')[0]);
-            } else if (link.rel.includes('apple-touch-icon')) {
-                size = 180;
-            } else {
-                size = 16;
-            }
-            return { href: absoluteUrl(link.href), size };
-        }).sort((a, b) => b.size - a.size)[0];
-        return best ? best.href : null;
-    })();
-    """
-
-        webView.evaluateJavascript(fetchFavIconUrl) { result ->
+        webView.evaluateJavascript(FETCH_FAV_ICON_URL_JS) { result ->
             val faviconUrl = result?.trim('"')?.takeIf { it.isNotEmpty() && it != "null" }
             if (!isDisappeared && faviconUrl != null) {
                 ExploreHistoryStore.saveSiteVisit(
@@ -398,6 +477,70 @@ class InAppBrowserVC(
                     )
                 )
             }
+        }
+    }
+
+    private fun updateSystemBarColors() {
+        if (isDisappeared || topBar.isMinimizing || topBar.isMinimized) {
+            window?.forceStatusBarLight = null
+            window?.forceBottomBarLight = null
+            return
+        }
+        topBar.overrideThemeIsDark?.let { overrideThemeIsDark ->
+            window?.forceStatusBarLight = overrideThemeIsDark
+            window?.forceBottomBarLight = overrideThemeIsDark
+        }
+    }
+
+    private fun setBarColorBasedOnContent() {
+        webView.evaluateJavascript(FETCH_HEADER_COLOR_JS) { result ->
+            val cssColor = result?.trim('"')
+
+            if (!cssColor.isNullOrEmpty() && cssColor != "null") {
+                try {
+                    val parsedColor = cssColor.toColorInt()
+                    animateBarBackground(parsedColor)
+                } catch (_: IllegalArgumentException) {
+                    animateBarBackground(null)
+                }
+            } else {
+                animateBarBackground(null)
+            }
+        }
+    }
+
+    private var topBackgroundColor: Int? = null
+    private fun animateBarBackground(newColor: Int?) {
+        val isMinimized = topBar.isMinimizing || topBar.isMinimized
+        newColor?.let { newColor ->
+            val isDark = !newColor.isBrightColor()
+            topBar.overrideThemeIsDark = isDark
+        } ?: run {
+            topBar.overrideThemeIsDark = null
+        }
+        updateSystemBarColors()
+        if (isMinimized) {
+            topBackgroundColor = newColor
+            topReversedCornerView?.setBlurOverlayColor(topBackgroundColor)
+            bottomReversedCornerView?.setBlurOverlayColor(topBackgroundColor)
+            return
+        }
+        ValueAnimator.ofArgb(
+            topBackgroundColor ?: WColor.SecondaryBackground.color,
+            newColor ?: WColor.SecondaryBackground.color
+        ).apply {
+            duration = AnimationConstants.VERY_QUICK_ANIMATION
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { animator ->
+                topBackgroundColor = animator.animatedValue as Int
+                topReversedCornerView?.setBlurOverlayColor(topBackgroundColor!!)
+                bottomReversedCornerView?.setBlurOverlayColor(topBackgroundColor!!)
+            }
+            doOnEnd {
+                topReversedCornerView?.setBlurOverlayColor(newColor)
+                bottomReversedCornerView?.setBlurOverlayColor(newColor)
+            }
+            start()
         }
     }
 
@@ -464,6 +607,11 @@ class InAppBrowserVC(
 
     override fun onWalletEvent(walletEvent: WalletEvent) {
         when (walletEvent) {
+            is WalletEvent.AccountChanged -> {
+                val accountId = AccountStore.activeAccountId ?: return
+                injectedInterface?.updateAccountId(accountId)
+            }
+
             is WalletEvent.DappRemoved -> {
                 if (config.url.removeSuffix("/") == walletEvent.dapp.url) {
                     webView.loadUrl(config.url)

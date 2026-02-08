@@ -23,23 +23,24 @@ import android.widget.Toast
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
-import org.mytonwallet.app_air.uicomponents.adapter.implementation.holders.ListTitleCell
 import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
 import org.mytonwallet.app_air.uicomponents.base.WViewController
+import org.mytonwallet.app_air.uicomponents.commonViews.cells.HeaderCell
 import org.mytonwallet.app_air.uicomponents.commonViews.TokenAmountInputView
-import org.mytonwallet.app_air.uicomponents.drawable.SeparatorBackgroundDrawable
 import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
+import org.mytonwallet.app_air.uicomponents.helpers.HapticType
+import org.mytonwallet.app_air.uicomponents.helpers.Haptics
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.helpers.typeface
 import org.mytonwallet.app_air.uicomponents.viewControllers.selector.TokenSelectorVC
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WView
 import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup
+import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup.BackgroundStyle
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
 import org.mytonwallet.app_air.walletbasecontext.models.MBaseCurrency
-import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
@@ -57,6 +58,7 @@ import java.math.BigInteger
 import kotlin.math.max
 
 class InvoiceVC(context: Context) : WViewController(context) {
+    override val TAG = "Invoice"
 
     override val shouldDisplayBottomBar = true
 
@@ -65,14 +67,14 @@ class InvoiceVC(context: Context) : WViewController(context) {
     }
 
     private val amountInputView by lazy {
-        TokenAmountInputView(context).apply {
+        TokenAmountInputView(context, isFirstItem = true).apply {
             id = View.generateViewId()
         }
     }
 
-    private val title2 = ListTitleCell(context).apply {
+    private val title2 = HeaderCell(context).apply {
         id = View.generateViewId()
-        text = LocaleController.getString("Comment")
+        configure(LocaleController.getString("Comment"), titleColor = WColor.Tint, topRounding = HeaderCell.TopRounding.NORMAL)
     }
 
     private val commentInputView by lazy {
@@ -91,8 +93,9 @@ class InvoiceVC(context: Context) : WViewController(context) {
         }
     }
 
-    private val title3 = ListTitleCell(context).apply {
+    private val title3 = HeaderCell(context).apply {
         id = View.generateViewId()
+        configure("", titleColor = WColor.Tint, topRounding = HeaderCell.TopRounding.NORMAL)
     }
 
     private val linkLabel by lazy {
@@ -228,7 +231,8 @@ class InvoiceVC(context: Context) : WViewController(context) {
                     TokenStore.tokens.values.filter {
                         it.chain == MBlockchain.ton.name
                     },
-                    true
+                    showMyAssets = true,
+                    showChain = false,
                 ).apply {
                     setOnAssetSelectListener { asset ->
                         token = TokenStore.getToken(asset.slug)
@@ -245,42 +249,18 @@ class InvoiceVC(context: Context) : WViewController(context) {
         super.updateTheme()
         view.setBackgroundColor(WColor.SecondaryBackground.color)
         topGapView.setBackgroundColor(WColor.Background.color)
-        title2.setBackgroundColor(
+        commentInputView.setBackgroundColor(
             WColor.Background.color,
-            ViewConstants.BIG_RADIUS.dp,
             0f,
+            ViewConstants.BIG_RADIUS.dp
         )
-        title2.setTextColor(WColor.PrimaryText.color)
-        if (ThemeManager.uiMode.hasRoundedCorners) {
-            commentInputView.setBackgroundColor(
-                WColor.Background.color,
-                0f,
-                ViewConstants.BIG_RADIUS.dp
-            )
-        } else {
-            commentInputView.background = SeparatorBackgroundDrawable().apply {
-                backgroundWColor = WColor.Background
-            }
-        }
         commentInputView.setTextColor(WColor.PrimaryText.color)
         commentInputView.setHintTextColor(WColor.SecondaryText.color)
-        title3.setBackgroundColor(
+        linkLabel.setBackgroundColor(
             WColor.Background.color,
-            ViewConstants.BIG_RADIUS.dp,
             0f,
+            ViewConstants.BIG_RADIUS.dp
         )
-        title3.setTextColor(WColor.PrimaryText.color)
-        if (ThemeManager.uiMode.hasRoundedCorners) {
-            linkLabel.setBackgroundColor(
-                WColor.Background.color,
-                0f,
-                ViewConstants.BIG_RADIUS.dp
-            )
-        } else {
-            linkLabel.background = SeparatorBackgroundDrawable().apply {
-                backgroundWColor = WColor.Background
-            }
-        }
     }
 
     override fun insetsUpdated() {
@@ -341,9 +321,10 @@ class InvoiceVC(context: Context) : WViewController(context) {
     }
 
     private fun updateLink() {
-        title3.text =
+        title3.setTitle(
             LocaleController.getString("Share this URL to receive %token%")
                 .replace("%token%", token?.name ?: "")
+        )
         val shareLink = AddressHelpers.walletInvoiceUrl(
             AccountStore.activeAccount!!.tonAddress!!,
             commentInputView.text.toString(),
@@ -380,6 +361,7 @@ class InvoiceVC(context: Context) : WViewController(context) {
                                 context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             val clip = ClipData.newPlainText("", shareLink)
                             clipboard.setPrimaryClip(clip)
+                            Haptics.play(context, HapticType.LIGHT_TAP)
                             Toast.makeText(context, "Invoice link was copied!", Toast.LENGTH_SHORT)
                                 .show()
                         },
@@ -398,9 +380,13 @@ class InvoiceVC(context: Context) : WViewController(context) {
                                 )
                             )
                         }),
-                    offset = 20.dp,
+                    xOffset = 20.dp,
                     popupWidth = WRAP_CONTENT,
-                    aboveView = false
+                    positioning = WMenuPopup.Positioning.BELOW,
+                    windowBackgroundStyle = BackgroundStyle.Cutout.fromView(
+                        linkLabel,
+                        roundRadius = 16f.dp
+                    )
                 )
             }
 

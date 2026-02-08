@@ -1,28 +1,31 @@
 
 import SwiftUI
-import UIKit
 import UIComponents
 import WalletContext
-import WalletCore
 import Kingfisher
+import Perception
 
 struct ActionsWithBackground: View {
     
-    @ObservedObject var viewModel: NftDetailsViewModel
+    var viewModel: NftDetailsViewModel
     
     var body: some View {
-        NftDetailsActionsRow(viewModel: viewModel)
-            .offset(y: viewModel.isFullscreenPreviewOpen ? 100 : 0)
-            .background(alignment: .bottom) {
-                darkenAndBlurBackground
-            }
-            .background(alignment: .top) {
-                mirroredImageBackground
-            }
-            .mask {
-                Rectangle().padding(.top, -500)
-            }
-            .opacity(viewModel.shouldShowControls ? 1 : 0)
+        WithPerceptionTracking {
+            @Perception.Bindable var viewModel = viewModel
+            NftDetailsActionsRow(viewModel: viewModel)
+                .frame(maxWidth: .infinity)
+                .offset(y: viewModel.isFullscreenPreviewOpen ? 100 : 0)
+                .background(alignment: .bottom) {
+                    darkenAndBlurBackground
+                }
+                .background(alignment: .top) {
+                    mirroredImageBackground
+                }
+                .mask {
+                    Rectangle().padding(.top, -500)
+                }
+                .opacity(viewModel.shouldShowControls ? 1 : 0)
+        }
     }
     
     @ViewBuilder
@@ -83,7 +86,7 @@ struct ActionsWithBackground: View {
 #if DEBUG
 @available(iOS 18, *)
 #Preview {
-    @Previewable var viewModel = NftDetailsViewModel(nft: .sampleMtwCard, listContext: .none, navigationBarInset: 0)
+    @Previewable var viewModel = NftDetailsViewModel(accountId: "0-mainnet", nft: .sampleMtwCard, listContext: .none)
     @Previewable @Namespace var ns
     ZStack {
         Color.blue.opacity(0.2)

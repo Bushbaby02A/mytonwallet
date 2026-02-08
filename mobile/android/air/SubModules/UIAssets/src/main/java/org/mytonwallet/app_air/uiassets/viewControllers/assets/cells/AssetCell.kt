@@ -12,19 +12,21 @@ import android.view.animation.LinearInterpolator
 import androidx.core.view.setPadding
 import org.mytonwallet.app_air.uiassets.viewControllers.assets.AssetsVC
 import org.mytonwallet.app_air.uicomponents.AnimationConstants
+import org.mytonwallet.app_air.uicomponents.drawable.WRippleDrawable
 import org.mytonwallet.app_air.uicomponents.extensions.dp
-import org.mytonwallet.app_air.uicomponents.extensions.updateDotsTypeface
+import org.mytonwallet.app_air.uicomponents.extensions.styleDots
 import org.mytonwallet.app_air.uicomponents.widgets.WAnimationView
 import org.mytonwallet.app_air.uicomponents.widgets.WCell
 import org.mytonwallet.app_air.uicomponents.widgets.WImageView
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WThemedView
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
-import org.mytonwallet.app_air.walletcontext.helpers.DevicePerformanceClassifier
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
+import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletbasecontext.utils.formatStartEndAddress
+import org.mytonwallet.app_air.walletcontext.helpers.DevicePerformanceClassifier
 import org.mytonwallet.app_air.walletcore.moshi.ApiNft
 
 @SuppressLint("ViewConstructor")
@@ -33,6 +35,8 @@ class AssetCell(
     val mode: AssetsVC.Mode
 ) : WCell(context, LayoutParams(MATCH_PARENT, WRAP_CONTENT)),
     WThemedView {
+
+    private val ripple = WRippleDrawable.create(16f.dp)
 
     var onTap: ((transaction: ApiNft) -> Unit)? = null
 
@@ -53,6 +57,7 @@ class AssetCell(
             setStyle(16f)
             setSingleLine()
             ellipsize = TextUtils.TruncateAt.END
+            setTextColor(WColor.PrimaryText)
         }
     }
 
@@ -61,10 +66,12 @@ class AssetCell(
             setStyle(14f)
             setSingleLine()
             ellipsize = TextUtils.TruncateAt.END
+            setTextColor(WColor.SecondaryText)
         }
     }
 
     init {
+        background = ripple
         setPadding((if (mode == AssetsVC.Mode.COMPLETE) 8 else 4).dp)
 
         addView(imageView, LayoutParams(0, 0))
@@ -100,18 +107,32 @@ class AssetCell(
         updateTheme()
     }
 
+    private var _isDarkThemeApplied: Boolean? = null
     override fun updateTheme() {
-        addRippleEffect(WColor.SecondaryBackground.color, 16f.dp)
-        titleLabel.setTextColor(WColor.PrimaryText.color)
-        subtitleLabel.setTextColor(WColor.SecondaryText.color)
+        val darkModeChanged = ThemeManager.isDark != _isDarkThemeApplied
+        if (!darkModeChanged)
+            return
+        _isDarkThemeApplied = ThemeManager.isDark
+        ripple.rippleColor = WColor.SecondaryBackground.color
+        titleLabel.updateTheme()
+        subtitleLabel.updateTheme()
     }
 
     private var nft: ApiNft? = null
+    private var isInDragMode = false
+    private var animationsPaused = false
     fun configure(
         nft: ApiNft,
-        isInDragMode: Boolean
+        isInDragMode: Boolean,
+        animationsPaused: Boolean
     ) {
+        if (this.nft == nft && this.isInDragMode == isInDragMode && this.animationsPaused == animationsPaused) {
+            updateTheme()
+            return
+        }
         this.nft = nft
+        this.isInDragMode = isInDragMode
+        this.animationsPaused = animationsPaused
         imageView.loadUrl(nft.thumbnail ?: "")
         if (mode == AssetsVC.Mode.COMPLETE) {
             nft.name?.let {
@@ -119,7 +140,7 @@ class AssetCell(
             } ?: run {
                 titleLabel.text =
                     SpannableStringBuilder(nft.address.formatStartEndAddress()).apply {
-                        updateDotsTypeface()
+                        styleDots()
                     }
             }
             subtitleLabel.text =
@@ -129,10 +150,12 @@ class AssetCell(
             animationView.visibility = GONE
             if (nft.metadata?.lottie?.isNotBlank() == true) {
                 animationView.visibility = VISIBLE
-                animationView.playFromUrl(nft.metadata!!.lottie!!, onStart = {})
+                animationView.playFromUrl(
+                    url = nft.metadata!!.lottie!!,
+                    play = !animationsPaused,
+                    onStart = {})
             }
         }
-        updateTheme()
         if (isInDragMode) {
             startShake()
         } else {

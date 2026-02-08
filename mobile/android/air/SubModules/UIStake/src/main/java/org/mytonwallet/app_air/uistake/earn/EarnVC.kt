@@ -61,15 +61,14 @@ import org.mytonwallet.app_air.uistake.staking.StakingVC
 import org.mytonwallet.app_air.uistake.staking.StakingViewModel
 import org.mytonwallet.app_air.uistake.util.getTonStakingFees
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
+import org.mytonwallet.app_air.walletbasecontext.logger.Logger
 import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletbasecontext.utils.toString
 import org.mytonwallet.app_air.walletcontext.utils.IndexPath
-import org.mytonwallet.app_air.walletcontext.utils.WEquatable
 import org.mytonwallet.app_air.walletcontext.utils.colorWithAlpha
-import org.mytonwallet.app_air.walletcontext.utils.diff
 import org.mytonwallet.app_air.walletcore.MYCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.TONCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.USDE_SLUG
@@ -86,6 +85,10 @@ class EarnVC(
     val tokenSlug: String,
     private var onScroll: ((rv: RecyclerView) -> Unit)?
 ) : WViewControllerWithModelStore(context), WRecyclerViewDataSource {
+    override val TAG = "Earn"
+
+    override val displayedAccount =
+        DisplayedAccount(AccountStore.activeAccountId, AccountStore.isPushedTemporary)
 
     override val shouldDisplayTopBar = false
     override val shouldDisplayBottomBar = true
@@ -218,10 +221,6 @@ class EarnVC(
         wView.visibility = View.GONE
         wView.apply {
             addView(
-                noItemSeparator,
-                ConstraintLayout.LayoutParams(MATCH_CONSTRAINT, 12.dp)
-            )
-            addView(
                 animationView,
                 ConstraintLayout.LayoutParams(124.dp, 124.dp)
             )
@@ -235,8 +234,6 @@ class EarnVC(
             )
 
             setConstraints {
-                toTop(noItemSeparator)
-                toCenterX(noItemSeparator)
                 toCenterX(animationView)
                 topToBottom(noItemLabel, animationView, 12f)
                 toCenterX(noItemLabel, 40f)
@@ -256,8 +253,6 @@ class EarnVC(
         }
         wView
     }
-
-    private val noItemSeparator = WView(context)
 
     private val animationView: WAnimationView by lazy {
         val v = WAnimationView(context)
@@ -401,9 +396,9 @@ class EarnVC(
                 id = View.generateViewId()
                 setStyle(16f)
                 setGradientColor(
-                    intArrayOf(
-                        WColor.EarnGradientLeft.color,
-                        WColor.EarnGradientRight.color
+                    arrayOf(
+                        WColor.EarnGradientLeft,
+                        WColor.EarnGradientRight
                     )
                 )
             },
@@ -422,6 +417,7 @@ class EarnVC(
         }
         isGone = AccountStore.activeAccount?.accountType == MAccount.AccountType.VIEW
         setTextColor(WColor.Tint)
+        isTinted = true
         setPadding(12.dp, 0, 12.dp, 0)
         gravity = Gravity.CENTER
     }
@@ -430,7 +426,7 @@ class EarnVC(
             elevation = 4f.dp
             val titleLabel = WLabel(context).apply {
                 text =
-                    LocaleController.getString("\$accumulated_rewards")
+                    LocaleController.getString("Accumulated Rewards")
                 setStyle(16f, WFont.Medium)
                 setTextColor(WColor.PrimaryText)
                 setSingleLine()
@@ -511,11 +507,16 @@ class EarnVC(
     }
 
     private var lastListState: HistoryListState? = null
-    private var previousHistoryItems: List<WEquatable<*>> = emptyList()
+    private var previousHistoryItems: List<EarnItem> = emptyList()
     private fun updateItems(newItems: List<EarnItem>) {
-        val changes = previousHistoryItems.diff(newItems, section = 1)
-        rvAdapter.applyChanges(changes)
-        previousHistoryItems = newItems.toList()
+        val previousHistoryItems = previousHistoryItems
+        this.previousHistoryItems = newItems.toList()
+        rvAdapter.applyChanges(
+            previousHistoryItems,
+            newItems,
+            1,
+            true
+        )
     }
 
     private fun updateView(viewState: EarnViewState) {
@@ -524,6 +525,7 @@ class EarnVC(
             setStakingBalance(
                 viewState.stakingBalance ?: "0",
                 earnViewModel.token?.symbol ?: "",
+                viewState.stakingBalanceIsLarge,
             )
             setSubtitle(AccountStore.stakingData?.stakingState(tokenSlug))
             changeAddStakeButtonEnable(viewState.enableAddStakeButton)
@@ -538,7 +540,8 @@ class EarnVC(
                 } else {
                     headerView.showInnerViews(
                         viewState.showAddStakeButton,
-                        viewState.showUnstakeButton
+                        viewState.showUnstakeButton,
+                        viewState.showBiggerUnstakeButton
                     )
                 }
                 recyclerView.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
@@ -549,7 +552,10 @@ class EarnVC(
             }
 
             is HistoryListState.NoItem -> {
-                headerView.showInnerViews(viewState.showAddStakeButton, viewState.showUnstakeButton)
+                headerView.showInnerViews(
+                    viewState.showAddStakeButton,
+                    viewState.showUnstakeButton, viewState.showBiggerUnstakeButton
+                )
                 recyclerView.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
                 noItemView.visibility = View.VISIBLE
                 updateSkeletonState()
@@ -570,7 +576,11 @@ class EarnVC(
             }
 
             is HistoryListState.HasItem -> {
-                headerView.showInnerViews(viewState.showAddStakeButton, viewState.showUnstakeButton)
+                headerView.showInnerViews(
+                    viewState.showAddStakeButton,
+                    viewState.showUnstakeButton,
+                    viewState.showBiggerUnstakeButton
+                )
                 recyclerView.overScrollMode = RecyclerView.OVER_SCROLL_ALWAYS
                 noItemView.visibility = View.GONE
                 updateSkeletonState()
@@ -629,9 +639,9 @@ class EarnVC(
     override fun updateTheme() {
         super.updateTheme()
 
+        recyclerView.setBackgroundColor(WColor.SecondaryBackground.color)
+
         noItemView.setBackgroundColor(WColor.Background.color, ViewConstants.BIG_RADIUS.dp, 0f)
-        noItemSeparator.isVisible = !ThemeManager.uiMode.hasRoundedCorners
-        noItemSeparator.setBackgroundColor(WColor.SecondaryBackground.color)
         noItemLabel.setTextColor(WColor.PrimaryText.color)
 
         rvAdapter.reloadData()
@@ -753,9 +763,7 @@ class EarnVC(
         val cellLayoutParams = RecyclerView.LayoutParams(MATCH_PARENT, 0)
         (cellHolder.cell as EarnSpaceCell).updateTheme()
 
-        val newHeight =
-            (if (!ThemeManager.uiMode.hasRoundedCorners) ViewConstants.GAP.dp else 0) +
-                headerHeight
+        val newHeight = headerHeight
         cellLayoutParams.height = newHeight
         cellHolder.cell.layoutParams = cellLayoutParams
     }
@@ -902,6 +910,7 @@ class EarnVC(
     }
 
     private fun claimRewardsPressed() {
+        Logger.d(Logger.LogTag.STAKING, "claimRewardsPressed: tokenSlug=$tokenSlug")
         if (AccountStore.activeAccount?.isHardware == true) {
             claimRewardsHardware()
         } else {
@@ -939,6 +948,11 @@ class EarnVC(
             ),
             task = { passcode ->
                 earnViewModel.requestClaimRewards(passcode) { err ->
+                    if (err != null) {
+                        Logger.d(Logger.LogTag.STAKING, "requestClaimRewards: Failed error=${err.parsed}")
+                    } else {
+                        Logger.d(Logger.LogTag.STAKING, "requestClaimRewards: Success tokenSlug=$tokenSlug")
+                    }
                     if (AccountStore.stakingData?.stakingState(tokenSlug) is StakingState.Ethena) {
                         window?.dismissLastNav {
                             window?.dismissLastNav()

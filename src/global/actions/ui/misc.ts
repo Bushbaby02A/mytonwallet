@@ -8,6 +8,7 @@ import {
   DomainLinkingState,
   SettingsState,
   SwapState,
+  TransactionInfoState,
   TransferState,
 } from '../../types';
 
@@ -20,15 +21,22 @@ import {
   IS_PRODUCTION,
   PRODUCTION_URL,
 } from '../../../config';
+import { parseNotificationTxId } from '../../../util/activities';
 import { getDoesUsePinPad } from '../../../util/biometrics';
-import { openDeeplinkOrUrl, parseDeeplinkTransferParams, processDeeplink } from '../../../util/deeplink';
+import {
+  openDeeplinkOrUrl,
+  parseDeeplinkTransferParams,
+  processDeeplink,
+} from '../../../util/deeplink';
 import getIsAppUpdateNeeded from '../../../util/getIsAppUpdateNeeded';
 import { vibrate, vibrateOnSuccess } from '../../../util/haptics';
 import { omit } from '../../../util/iteratees';
 import { getTranslation } from '../../../util/langProvider';
+import { logDebugError } from '../../../util/logs';
 import { callActionInMain, callActionInNative } from '../../../util/multitab';
 import { openUrl } from '../../../util/openUrl';
 import { getTelegramApp } from '../../../util/telegram';
+import { getChainBySlug } from '../../../util/tokens';
 import {
   getIsMobileTelegramApp,
   IS_ANDROID_APP,
@@ -53,13 +61,16 @@ import {
   updateCurrentAccountState,
   updateCurrentDomainLinking,
   updateCurrentSwap,
+  updateCurrentTransactionInfo,
   updateCurrentTransfer,
   updateSettings,
 } from '../../reducers';
 import {
   selectCurrentAccount,
+  selectCurrentAccountId,
   selectCurrentAccountSettings,
   selectCurrentAccountState,
+  selectCurrentNetwork,
   selectIsPasswordPresent,
 } from '../../selectors';
 import { switchAccount } from '../api/auth';
@@ -80,9 +91,9 @@ addActionHandler('showActivityInfo', (global, actions, { id }) => {
   return updateCurrentAccountState(global, { currentActivityId: id });
 });
 
-addActionHandler('showAnyAccountTx', async (global, actions, { txId, accountId, network }) => {
+addActionHandler('showAnyAccountTx', async (global, actions, { txId, accountId, network, chain }) => {
   if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('showAnyAccountTx', { txId, accountId, network });
+    callActionInMain('showAnyAccountTx', { txId, accountId, network, chain });
     return;
   }
 
@@ -91,21 +102,8 @@ addActionHandler('showAnyAccountTx', async (global, actions, { txId, accountId, 
     switchAccount(global, accountId, network),
   ]);
 
-  actions.showActivityInfo({ id: txId });
-});
-
-addActionHandler('showAnyAccountTokenActivity', async (global, actions, { slug, accountId, network }) => {
-  if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('showAnyAccountTokenActivity', { slug, accountId, network });
-    return;
-  }
-
-  await Promise.all([
-    closeAllOverlays(),
-    switchAccount(global, accountId, network),
-  ]);
-
-  actions.showTokenActivity({ slug });
+  const txHash = parseNotificationTxId(txId);
+  actions.openTransactionInfo({ txHash, chain });
 });
 
 addActionHandler('closeActivityInfo', (global, actions, { id }) => {
@@ -116,8 +114,119 @@ addActionHandler('closeActivityInfo', (global, actions, { id }) => {
   return updateCurrentAccountState(global, { currentActivityId: undefined });
 });
 
+addActionHandler('openTransactionInfo', async (global, actions, payload) => {
+  const chain = payload.chain;
+  const isTxId = 'txId' in payload;
+  const txId = isTxId ? payload.txId : payload.txHash;
+  let activities = payload.activities;
+
+  const account = selectCurrentAccount(getGlobal());
+  if (!account) {
+    const isTooEarly = (getGlobal() as AnyLiteral).isInited === false;
+    logDebugError('openTransactionInfo', 'Account not found', isTooEarly);
+    setGlobal(updateCurrentTransactionInfo(getGlobal(), {
+      state: TransactionInfoState.None,
+      error: 'Unexpected error',
+    }));
+    actions.showError({ error: 'Unexpected error' });
+    return;
+  }
+
+  const chainAccount = account.byChain[chain];
+  const walletAddress = chainAccount?.address ?? '';
+
+  const network = selectCurrentNetwork(getGlobal());
+
+  const options = isTxId ? { chain, network, txId, walletAddress } : { chain, network, txHash: txId, walletAddress };
+
+  if (!activities) {
+    // This should be called on main to trigger NBS opening
+    setGlobal(updateCurrentTransactionInfo(getGlobal(), {
+      state: TransactionInfoState.Loading,
+      txId,
+      chain,
+    }));
+
+    if (IS_DELEGATING_BOTTOM_SHEET) {
+      callActionInNative(
+        'openTransactionInfo',
+        payload,
+        { sheetKey: 'transaction-info' },
+      );
+      return;
+    }
+
+    activities = await callApi('fetchTransactionById', options);
+  }
+
+  if (!activities || activities.length === 0) {
+    setGlobal(updateCurrentTransactionInfo(getGlobal(), {
+      state: TransactionInfoState.None,
+      error: '$transaction_not_found',
+    }));
+    actions.showError({ error: '$transaction_not_found' });
+    return;
+  }
+
+  // If single activity, show detail directly; otherwise show list
+  const nextState = activities.length === 1
+    ? TransactionInfoState.ActivityDetail
+    : TransactionInfoState.ActivityList;
+
+  setGlobal(updateCurrentTransactionInfo(getGlobal(), {
+    state: nextState,
+    txId,
+    chain,
+    activities,
+    selectedActivityIndex: activities.length === 1 ? 0 : undefined,
+  }));
+});
+
+addActionHandler('closeTransactionInfo', (global) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('closeTransactionInfo');
+  }
+
+  return {
+    ...global,
+    currentTransactionInfo: {
+      state: TransactionInfoState.None,
+    },
+  };
+});
+
+addActionHandler('selectTransactionInfoActivity', (global, actions, { index }) => {
+  if (global.currentTransactionInfo.state === TransactionInfoState.None) {
+    return undefined;
+  }
+
+  // If index is -1, go back to list view
+  if (index < 0) {
+    return {
+      ...global,
+      currentTransactionInfo: {
+        ...global.currentTransactionInfo,
+        state: TransactionInfoState.ActivityList,
+        selectedActivityIndex: undefined,
+      },
+    };
+  }
+
+  return {
+    ...global,
+    currentTransactionInfo: {
+      ...global.currentTransactionInfo,
+      state: TransactionInfoState.ActivityDetail,
+      selectedActivityIndex: index,
+    },
+  };
+});
+
 addActionHandler('addSavedAddress', (global, actions, { address, name, chain }) => {
   const { savedAddresses = [] } = selectCurrentAccountState(global) || {};
+
+  const isAlreadySaved = savedAddresses.some((item) => item.address === address && item.chain === chain);
+  if (isAlreadySaved) return;
 
   return updateCurrentAccountState(global, {
     savedAddresses: [
@@ -189,7 +298,7 @@ addActionHandler('addAccount', async (global, actions, { method, password, isAut
 
   global = getGlobal();
   if (isMnemonicImport || !isPasswordPresent) {
-    global = { ...global, isAddAccountModalOpen: undefined };
+    global = { ...global, isAccountSelectorOpen: undefined };
   } else {
     global = updateAccounts(global, { isLoading: true });
   }
@@ -249,12 +358,12 @@ addActionHandler('openAddAccountModal', (global, _, props) => {
     return;
   }
 
-  global = { ...global, isAddAccountModalOpen: true };
+  global = { ...global, isAccountSelectorOpen: true };
 
   if (forceAddingTonOnlyAccount || initialState !== undefined) {
     global = updateAuth(global, {
       forceAddingTonOnlyAccount,
-      initialState,
+      initialAddAccountState: initialState,
     });
   }
 
@@ -268,9 +377,9 @@ addActionHandler('closeAddAccountModal', (global, _, props) => {
 
   global = updateAuth(global, {
     forceAddingTonOnlyAccount: undefined,
-    initialState: undefined,
+    initialAddAccountState: undefined,
   });
-  global = { ...global, isAddAccountModalOpen: undefined };
+  global = { ...global, isAccountSelectorOpen: undefined };
 
   return global;
 });
@@ -307,7 +416,7 @@ addActionHandler('setSettingsState', (global, actions, { state }) => {
 });
 
 addActionHandler('closeSettings', (global) => {
-  if (!global.currentAccountId) {
+  if (!selectCurrentAccountId(global)) {
     return global;
   }
 
@@ -347,12 +456,35 @@ addActionHandler('changeLanguage', (global, actions, { langCode }) => {
   };
 });
 
+addActionHandler('setSelectedExplorerId', (global, actions, { chain, explorerId }) => {
+  return {
+    ...global,
+    settings: {
+      ...global.settings,
+      selectedExplorerIds: {
+        ...global.settings.selectedExplorerIds,
+        [chain]: explorerId,
+      },
+    },
+  };
+});
+
 addActionHandler('toggleCanPlaySounds', (global, actions, { isEnabled } = {}) => {
   return {
     ...global,
     settings: {
       ...global.settings,
       canPlaySounds: isEnabled,
+    },
+  };
+});
+
+addActionHandler('toggleSeasonalTheming', (global, actions, { isEnabled }) => {
+  return {
+    ...global,
+    settings: {
+      ...global.settings,
+      isSeasonalThemingDisabled: !isEnabled || undefined,
     },
   };
 });
@@ -483,7 +615,7 @@ addActionHandler('requestOpenQrScanner', async (global, actions) => {
   const { camera } = await BarcodeScanner.requestPermissions();
   const isGranted = camera === 'granted' || camera === 'limited';
   if (!isGranted) {
-    actions.showNotification({
+    actions.showToast({
       message: getTranslation('Permission denied. Please grant camera permission to use the QR code scanner.'),
     });
     return;
@@ -600,6 +732,21 @@ addActionHandler('openOnRampWidgetModal', (global, actions, { chain }) => {
 
 addActionHandler('closeOnRampWidgetModal', (global) => {
   setGlobal({ ...global, chainForOnRampWidgetModal: undefined });
+});
+
+addActionHandler('openOffRampWidgetModal', (global) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('openOffRampWidgetModal');
+    return;
+  }
+
+  const { tokenSlug } = global.currentTransfer;
+  const chain = tokenSlug ? getChainBySlug(tokenSlug) : 'ton';
+  setGlobal({ ...global, chainForOffRampWidgetModal: chain });
+});
+
+addActionHandler('closeOffRampWidgetModal', (global) => {
+  setGlobal({ ...global, chainForOffRampWidgetModal: undefined });
 });
 
 addActionHandler('openMediaViewer', (global, actions, {
@@ -808,6 +955,24 @@ addActionHandler('switchToExplore', (global: GlobalState, actions) => {
 addActionHandler('switchToSettings', (global: GlobalState, actions) => {
   actions.closeExplore(undefined, { forceOnHeavyAnimation: true });
   actions.openSettings(undefined, { forceOnHeavyAnimation: true });
+});
+
+addActionHandler('openPromotionModal', (global) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('openPromotionModal');
+    return global;
+  }
+
+  return { ...global, isPromotionModalOpen: true };
+});
+
+addActionHandler('closePromotionModal', (global) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('closePromotionModal');
+    return global;
+  }
+
+  return { ...global, isPromotionModalOpen: undefined };
 });
 
 addActionHandler('setAppLayout', (global, actions, { layout }) => {

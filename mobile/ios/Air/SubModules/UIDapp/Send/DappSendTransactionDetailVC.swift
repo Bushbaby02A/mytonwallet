@@ -5,14 +5,15 @@ import UIPasscode
 import UIComponents
 import WalletCore
 import WalletContext
-import Ledger
 
 
 class DappSendTransactionDetailVC: WViewController {
     
+    let accountContext: AccountContext
     private let message: ApiDappTransfer
     
-    init(message: ApiDappTransfer) {
+    init(accountContext: AccountContext, message: ApiDappTransfer) {
+        self.accountContext = accountContext
         self.message = message
         super.init(nibName: nil, bundle: nil)
     }
@@ -30,8 +31,8 @@ class DappSendTransactionDetailVC: WViewController {
     
     func makeView() -> DappSendTransactionDetailView {
         return DappSendTransactionDetailView(
+            accountContext: accountContext,
             message: message,
-            onScroll: { [weak self] y in self?.updateNavigationBarProgressiveBlur(y) }
         )
     }
     
@@ -62,7 +63,6 @@ class DappSendTransactionDetailVC: WViewController {
 //#Preview {
 //    let activity1 = ApiActivity.transaction(ApiTransactionActivity(id: "d", kind: "transaction", timestamp: 0, amount: -123456789, fromAddress: "foo", toAddress: "bar", comment: nil, encryptedComment: nil, fee: 12345, slug: TON_USDT_SLUG, isIncoming: false, normalizedAddress: nil, externalMsgHashNorm: nil, shouldHide: nil, type: nil, metadata: nil, nft: nil, isPending: nil))
 //    let activity2 = ApiActivity.transaction(ApiTransactionActivity(id: "d2", kind: "transaction", timestamp: 0, amount: -456789, fromAddress: "foo", toAddress: "bar", comment: nil, encryptedComment: nil, fee: 12345, slug: TON_USDT_SLUG, isIncoming: false, normalizedAddress: nil, externalMsgHashNorm: nil, shouldHide: nil, type: .callContract, metadata: nil, nft: nil, isPending: nil))
-//    let _ = UIFont.registerAirFonts()
 //    
 //    let request = MDappSendTransactions(
 //        promiseId: "",

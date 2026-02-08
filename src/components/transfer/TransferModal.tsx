@@ -8,6 +8,7 @@ import { TransferState } from '../../global/types';
 
 import { BURN_ADDRESS, NFT_BATCH_SIZE } from '../../config';
 import {
+  selectCurrentAccountId,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
   selectIsMultichainAccount,
@@ -31,7 +32,6 @@ import TransactionBanner from '../common/TransactionBanner';
 import LedgerConfirmOperation from '../ledger/LedgerConfirmOperation';
 import LedgerConnect from '../ledger/LedgerConnect';
 import Modal from '../ui/Modal';
-import ModalHeader from '../ui/ModalHeader';
 import Transition from '../ui/Transition';
 import TransferComplete from './TransferComplete';
 import TransferConfirm from './TransferConfirm';
@@ -90,6 +90,8 @@ function TransferModal({
   const symbol = selectedToken?.symbol || '';
   const isNftTransfer = Boolean(nfts?.length);
   const isBurning = toAddress === BURN_ADDRESS;
+  // After confirming the transaction, `toAddress` is set to empty string, so we need to use the previous value
+  const renderedToAddress = usePrevious(toAddress || undefined, true);
 
   const { renderingKey, nextKey, updateNextKey } = useModalTransitionKeys(state, isOpen);
 
@@ -134,10 +136,7 @@ function TransferModal({
     switch (currentKey) {
       case TransferState.Initial:
         return (
-          <>
-            <ModalHeader title={lang(isNftTransfer ? 'Send NFT' : 'Send')} onClose={handleModalCloseWithReset} />
-            <TransferInitial />
-          </>
+          <TransferInitial />
         );
       case TransferState.Confirm:
         return (
@@ -198,7 +197,7 @@ function TransferModal({
             symbol={symbol}
             txId={txId}
             tokenSlug={tokenSlug}
-            toAddress={toAddress}
+            toAddress={renderedToAddress}
             comment={comment}
             onInfoClick={handleTransactionInfoClick}
             onClose={handleModalCloseWithReset}
@@ -208,7 +207,7 @@ function TransferModal({
           <TransferMultiNftProcess
             nfts={nfts!}
             sentNftsCount={sentNftsCount}
-            toAddress={toAddress}
+            toAddress={renderedToAddress}
             onClose={handleModalCloseWithReset}
           />
         );
@@ -241,6 +240,7 @@ function TransferModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
+  const currentAccountId = selectCurrentAccountId(global);
   const accountState = selectCurrentAccountState(global);
 
   return {
@@ -248,6 +248,6 @@ export default memo(withGlobal((global): StateProps => {
     tokens: selectCurrentAccountTokens(global),
     savedAddresses: accountState?.savedAddresses,
     isMediaViewerOpen: Boolean(global.mediaViewer.mediaId),
-    isMultichainAccount: selectIsMultichainAccount(global, global.currentAccountId!),
+    isMultichainAccount: selectIsMultichainAccount(global, currentAccountId!),
   };
 })(TransferModal));

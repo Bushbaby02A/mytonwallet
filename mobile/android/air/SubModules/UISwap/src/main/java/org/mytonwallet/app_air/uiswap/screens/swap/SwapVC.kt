@@ -16,21 +16,22 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_CONSTRAINT
 import androidx.core.view.isGone
+import androidx.core.widget.NestedScrollView
 import androidx.lifecycle.ViewModelProvider
 import org.mytonwallet.app_air.uicomponents.AnimationConstants
 import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
 import org.mytonwallet.app_air.uicomponents.base.WViewControllerWithModelStore
 import org.mytonwallet.app_air.uicomponents.base.showAlert
 import org.mytonwallet.app_air.uicomponents.commonViews.ReversedCornerViewUpsideDown
-import org.mytonwallet.app_air.uicomponents.drawable.SeparatorBackgroundDrawable
 import org.mytonwallet.app_air.uicomponents.extensions.collectFlow
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import org.mytonwallet.app_air.uicomponents.extensions.exactly
 import org.mytonwallet.app_air.uicomponents.extensions.setConstraints
 import org.mytonwallet.app_air.uicomponents.extensions.setTextIfDiffer
+import org.mytonwallet.app_air.uicomponents.extensions.unspecified
 import org.mytonwallet.app_air.uicomponents.helpers.DieselAuthorizationHelpers
 import org.mytonwallet.app_air.uicomponents.viewControllers.selector.TokenSelectorVC
 import org.mytonwallet.app_air.uicomponents.widgets.ExpandableFrameLayout
@@ -52,7 +53,7 @@ import org.mytonwallet.app_air.uiswap.screens.swap.views.SwapSwapAssetsButton
 import org.mytonwallet.app_air.uiswap.screens.swap.views.dexAggregatorDialog.DexAggregatorDialog
 import org.mytonwallet.app_air.uiswap.views.SwapConfirmView
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
-import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
+import org.mytonwallet.app_air.walletbasecontext.logger.Logger
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
@@ -60,6 +61,7 @@ import org.mytonwallet.app_air.walletbasecontext.utils.boldSubstring
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
 import org.mytonwallet.app_air.walletcore.moshi.MApiSwapAsset
+import org.mytonwallet.app_air.walletcore.stores.AccountStore
 import java.math.BigInteger
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -72,18 +74,16 @@ class SwapVC(
     amountIn: Double? = null
 ) :
     WViewControllerWithModelStore(context) {
+    override val TAG = "Swap"
+
+    override val displayedAccount =
+        DisplayedAccount(AccountStore.activeAccountId, AccountStore.isPushedTemporary)
 
     private val swapViewModel by lazy { ViewModelProvider(this)[SwapViewModel::class.java] }
 
-    private val separatorBackgroundDrawable: SeparatorBackgroundDrawable by lazy {
-        SeparatorBackgroundDrawable().apply {
-            backgroundWColor = WColor.Background
-        }
-    }
-
-    private val scrollView = ScrollView(context).apply {
+    private val scrollView = NestedScrollView(context).apply {
         id = View.generateViewId()
-        overScrollMode = ScrollView.OVER_SCROLL_ALWAYS
+        overScrollMode = NestedScrollView.OVER_SCROLL_ALWAYS
         isVerticalScrollBarEnabled = false
     }
     private val contentLayout = FrameLayout(context)
@@ -266,7 +266,7 @@ class SwapVC(
             topToTop(
                 bottomReversedCornerViewUpsideDown,
                 continueButton,
-                -20f - ViewConstants.BIG_RADIUS
+                -ViewConstants.GAP - ViewConstants.BIG_RADIUS
             )
             toBottom(bottomReversedCornerViewUpsideDown)
         }
@@ -410,16 +410,11 @@ class SwapVC(
         super.updateTheme()
         view.setBackgroundColor(WColor.SecondaryBackground.color)
         estShowMoreContainer.setBackgroundColor(WColor.Background.color)
-        if (ThemeManager.uiMode.hasRoundedCorners) {
-            estOuterContainer.setBackgroundColor(
-                WColor.Background.color,
-                ViewConstants.BIG_RADIUS.dp,
-                true
-            )
-        } else {
-            estOuterContainer.background = separatorBackgroundDrawable
-            separatorBackgroundDrawable.invalidateSelf()
-        }
+        estOuterContainer.setBackgroundColor(
+            WColor.Background.color,
+            ViewConstants.BIG_RADIUS.dp,
+            true
+        )
     }
 
     var isSwapDone = false
@@ -433,7 +428,11 @@ class SwapVC(
                 }
                 push(
                     TokenSelectorVC(
-                        context, titleToShow, event.assets
+                        context,
+                        titleToShow,
+                        event.assets,
+                        showMyAssets = true,
+                        showChain = true,
                     ).apply {
                         setOnAssetSelectListener { asset ->
                             if (event.mode == SwapViewModel.Mode.SEND) {
@@ -493,13 +492,23 @@ class SwapVC(
 
             is SwapViewModel.Event.SwapComplete -> {
                 val success = event.success
+                Logger.d(Logger.LogTag.SWAP, "onEvent: SwapComplete success=$success")
                 if (success) {
                     if (isSwapDone)
                         return
                     isSwapDone = true
+                    if (window?.topNavigationController != navigationController) {
+                        window?.dismissNav(navigationController)
+                        return
+                    }
                     window?.dismissLastNav {
                         event.activity?.let { activity ->
-                            WalletCore.notifyEvent(WalletEvent.OpenActivity(activity))
+                            WalletCore.notifyEvent(
+                                WalletEvent.OpenActivity(
+                                    displayedAccount?.accountId!!,
+                                    activity
+                                )
+                            )
                         }
                     }
                 } else {
@@ -541,6 +550,7 @@ class SwapVC(
 
     private fun showConfirm(event: SwapViewModel.Event.ShowConfirm) {
         val request = event.request
+        Logger.d(Logger.LogTag.SWAP, "showConfirm: fromToken=${request.request.tokenToSend.symbol} toToken=${request.request.tokenToReceive.symbol}")
         view.hideKeyboard()
         val confirmActionVC = PasscodeConfirmVC(
             context,
@@ -580,10 +590,7 @@ class SwapVC(
         isShowingAlertView = true
 
         alertView.apply {
-            measure(
-                View.MeasureSpec.makeMeasureSpec(linearLayout.width, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-            )
+            measure(linearLayout.width.exactly, 0.unspecified)
             val targetHeight = measuredHeight
             val lp = layoutParams as ViewGroup.MarginLayoutParams
             lp.height = 0

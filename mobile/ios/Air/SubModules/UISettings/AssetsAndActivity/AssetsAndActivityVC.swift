@@ -36,6 +36,8 @@ public class AssetsAndActivityVC: WViewController {
     private let processorQueue = DispatchQueue(label: "org.mytonwallet.app.assetsAndActivity_vc_background_processor")
     private var tableView: UITableView!
     private var dataSource: UITableViewDiffableDataSource<Section, Item>!
+    @AccountContext(source: .current) private var account: MAccount
+    private var assetsAndActivityData: MAssetsAndActivityData? { AccountStore.assetsAndActivityData[account.id] }
 
     public override func loadView() {
         super.loadView()
@@ -50,22 +52,20 @@ public class AssetsAndActivityVC: WViewController {
     var tokensToDisplay: [String] {
         var tokens: OrderedSet<String> = []
         
-        if let walletTokens = BalanceStore.currentAccountBalanceData?.walletTokens.map(\.tokenSlug) {
+        if let walletTokens = $account.balanceData?.walletTokens.map(\.tokenSlug) {
             tokens.formUnion(walletTokens)
         }
 
-        let balanceTokens = BalanceStore.currentAccountBalances.keys    
+        let balanceTokens = $account.balances.keys
         tokens.formUnion(balanceTokens)
 
-        tokens.formUnion(DEFAULT_SLUGS)
+        tokens.formUnion(account.network == .testnet ? DEFAULT_TESTNET_SLUGS : DEFAULT_SLUGS)
 
-        if let account = AccountStore.account {
-            tokens = tokens.filter { slug in
-                if let chain = TokenStore.tokens[slug]?.chain {
-                    return account.supports(chain: chain)
-                }
-                return false
+        tokens = tokens.filter { slug in
+            if let chain = TokenStore.tokens[slug]?.chain {
+                return account.supports(chain: chain)
             }
+            return false
         }
         
         tokens.sort(by: { slug1, slug2 in
@@ -73,8 +73,8 @@ public class AssetsAndActivityVC: WViewController {
                 if token1.priority != token2.priority {
                     return token1.priority < token2.priority
                 }
-                let balance1 = Double(BalanceStore.currentAccountBalances[slug1] ?? 0) * (token1.price ?? 0)
-                let balance2 = Double(BalanceStore.currentAccountBalances[slug2] ?? 0) * (token2.price ?? 0)
+                let balance1 = Double($account.balances[slug1] ?? 0) * (token1.price ?? 0)
+                let balance2 = Double($account.balances[slug2] ?? 0) * (token2.price ?? 0)
                 if balance1 != balance2 {
                     return balance1 > balance2
                 }
@@ -86,7 +86,7 @@ public class AssetsAndActivityVC: WViewController {
         return Array(tokens)
     }
     
-    private var baseCurrency: MBaseCurrency { TokenStore.baseCurrency ?? .USD }
+    private var baseCurrency: MBaseCurrency { TokenStore.baseCurrency }
     
     private func setupViews() {
         title = lang("Assets & Activity")
@@ -135,7 +135,7 @@ public class AssetsAndActivityVC: WViewController {
     
     func makeDataSource() -> UITableViewDiffableDataSource<Section, Item> {
         let dataSource = UITableViewDiffableDataSource<Section, Item>(tableView: tableView) { [unowned self] tableView, indexPath, item in
-            
+            let accountId = self.account.id
             switch item {
             case .baseCurrency:
                 // Base currency and tiny tokens
@@ -154,7 +154,7 @@ public class AssetsAndActivityVC: WViewController {
                         HStack(spacing: 0) {
                             Text(lang("Hidden NFTs"))
                             Spacer()
-                            Text("\(NftStore.currentAccountHiddenNftsCount)")
+                            Text("\(NftStore.getAccountHiddenNftsCount(accountId: accountId))")
                                 .padding(.horizontal, 8)
                                 .foregroundStyle(Color(WTheme.secondaryLabel))
                             Image.airBundle("RightArrowIcon")
@@ -176,11 +176,11 @@ public class AssetsAndActivityVC: WViewController {
             case .hideNoCost:
                 let cell = tableView.dequeueReusableCell(withIdentifier: "hideNoCostTokensCell",
                                                          for: indexPath) as! AssetsAndActivityHideNoCostCell
-                cell.configure(isInModal: isModal) { [weak self] hideNoCost in
+                cell.configure(isInModal: isModal) { [weak self] _ in
                     guard let self else { return }
                     processorQueue.async(flags: .barrier) {
-                        guard let data = AccountStore.currentAccountAssetsAndActivityData else {return}
-                        AccountStore.setAssetsAndActivityData(accountId: AccountStore.accountId!, value: data)
+                        guard let data = self.assetsAndActivityData else { return }
+                        AccountStore.setAssetsAndActivityData(accountId: accountId, value: data)
                     }
                 }
                 return cell
@@ -216,10 +216,12 @@ public class AssetsAndActivityVC: WViewController {
                 let cell = tableView.dequeueReusableCell(withIdentifier: "tokenCell",
                                                          for: indexPath) as! AssetsAndActivityTokenCell
                 if let token {
+                    let isHidden = $account.balanceData?.walletTokens.contains(where: { $0.tokenSlug == token.slug }) != true
                     cell.configure(with: token,
-                                   balance: BalanceStore.currentAccountBalances[token.slug] ?? 0,
-                                   importedSlug: AccountStore.currentAccountAssetsAndActivityData?.importedSlugs.contains(tokenSlug) == true) { tokenSlug, visibility in
-                        guard var data = AccountStore.currentAccountAssetsAndActivityData else {return}
+                                   balance: $account.balances[token.slug] ?? 0,
+                                   importedSlug: assetsAndActivityData?.importedSlugs.contains(tokenSlug) == true,
+                                   isHidden: isHidden) { [weak self] tokenSlug, visibility in
+                        guard let self, var data = assetsAndActivityData else { return }
                         if visibility {
                             data.alwaysHiddenSlugs.remove(tokenSlug)
                             data.alwaysShownSlugs.insert(tokenSlug)
@@ -227,7 +229,7 @@ public class AssetsAndActivityVC: WViewController {
                             data.alwaysShownSlugs.remove(tokenSlug)
                             data.alwaysHiddenSlugs.insert(tokenSlug)
                         }
-                        AccountStore.setAssetsAndActivityData(accountId: AccountStore.accountId!, value: data)
+                        AccountStore.setAssetsAndActivityData(accountId: accountId, value: data)
                     }
                 }
                 cell.separatorInset.left = 68
@@ -241,7 +243,7 @@ public class AssetsAndActivityVC: WViewController {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.baseCurrency])
         snapshot.appendItems([.baseCurrency])
-        if NftStore.currentAccountHasHiddenNfts {
+        if NftStore.getAccountHasHiddenNfts(accountId: account.id) {
             snapshot.appendSections([.hiddenNfts])
             snapshot.appendItems([.hiddenNfts])
         }
@@ -268,6 +270,14 @@ public class AssetsAndActivityVC: WViewController {
         addTokenSeparator.backgroundColor = WTheme.separator
         addTokenView.highlightBackgroundColor = WTheme.highlight
         addTokenView.backgroundColor = WTheme.groupedItem
+    }
+    
+    public override func viewWillLayoutSubviews() {
+        // prevent unwanted animation on iOS 26
+        UIView.performWithoutAnimation {
+            tableView.frame = view.bounds
+        }
+        super.viewWillLayoutSubviews()
     }
     
     public override func scrollToTop(animated: Bool) {
@@ -353,9 +363,9 @@ public class AssetsAndActivityVC: WViewController {
     }
     
     func importedTokenRemoved(tokenSlug: String) {
-        guard var data = AccountStore.currentAccountAssetsAndActivityData else { return }
+        guard var data = assetsAndActivityData else { return }
         data.importedSlugs.remove(tokenSlug)
-        AccountStore.setAssetsAndActivityData(accountId: AccountStore.accountId!, value: data)
+        AccountStore.setAssetsAndActivityData(accountId: account.id, value: data)
         applySnapshot(makeSnapshot(), animated: true)
     }
 }
@@ -410,7 +420,7 @@ extension AssetsAndActivityVC: UITableViewDelegate {
             case .baseCurrency, .hideNoCost, .token:
                 break
             case .hiddenNfts:
-                AppActions.showHiddenNfts()
+                AppActions.showHiddenNfts(accountSource: .current)
             case .addToken:
                 addTokenPressed()
             }
@@ -424,7 +434,7 @@ extension AssetsAndActivityVC: UITableViewDelegate {
     
     public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard case .token(let tokenSlug) = dataSource.itemIdentifier(for: indexPath) else { return nil }
-        if let prefs = AccountStore.currentAccountAssetsAndActivityData, prefs.importedSlugs.contains(tokenSlug) {
+        if let prefs = assetsAndActivityData, prefs.importedSlugs.contains(tokenSlug) {
             let deleteAction = UIContextualAction(style: .destructive, title: lang("Remove")) { [weak self] _, _, callback in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     callback(true)
@@ -458,7 +468,7 @@ extension AssetsAndActivityVC: WalletCoreData.EventsObserver {
                 applySnapshot(snapshot, animated: true)
             }
         case .nftsChanged(let accountId):
-            if accountId == AccountStore.accountId {
+            if accountId == self.account.id {
                 applySnapshot(makeSnapshot(), animated: true)
             }
         default:
@@ -472,7 +482,7 @@ extension AssetsAndActivityVC: TokenSelectionVCDelegate {
     }
     
     public func didSelect(token: WalletCore.ApiToken) {
-        guard var data = AccountStore.currentAccountAssetsAndActivityData else {return}
+        guard var data = assetsAndActivityData else { return }
         data.deletedSlugs = data.deletedSlugs.filter({ it in
             it != token.slug
         })
@@ -480,7 +490,7 @@ extension AssetsAndActivityVC: TokenSelectionVCDelegate {
             // Token is not in the list, even after removing it from deleted tokens, so add it to manually added ones.
             data.importedSlugs.insert(token.slug)
         }
-        AccountStore.setAssetsAndActivityData(accountId: AccountStore.accountId!, value: data)
+        AccountStore.setAssetsAndActivityData(accountId: account.id, value: data)
         applySnapshot(makeSnapshot(), animated: true)
     }
 }

@@ -59,6 +59,7 @@ class TonConnectRequestSendVC(
     private val connectionType: ApiConnectionType,
     private var update: ApiUpdate.ApiUpdateDappSignRequest? = null
 ) : WViewControllerWithModelStore(context), CustomListAdapter.ItemClickListener, SkeletonContainer {
+    override val TAG = "TonConnectRequestSend"
 
     override val shouldDisplayTopBar = true
 
@@ -180,7 +181,7 @@ class TonConnectRequestSendVC(
             topToTop(
                 bottomReversedCornerViewUpsideDown,
                 cancelButtonView,
-                -20f - ViewConstants.BIG_RADIUS
+                -ViewConstants.GAP - ViewConstants.BIG_RADIUS
             )
             toBottom(bottomReversedCornerViewUpsideDown)
             toLeft(cancelButtonView, 20f)
@@ -433,13 +434,14 @@ class TonConnectRequestSendVC(
     private val ledgerSignDataObject: LedgerConnectVC.SignData
         get() {
             val updateValue = update ?: throw Exception("Update is null")
+            val accountId = updateValue.accountId
             return when (updateValue) {
                 is ApiUpdate.ApiUpdateDappSendTransactions -> {
-                    LedgerConnectVC.SignData.SignDappTransfers(updateValue)
+                    LedgerConnectVC.SignData.SignDappTransfers(accountId, updateValue)
                 }
 
                 is ApiUpdate.ApiUpdateDappSignData -> {
-                    LedgerConnectVC.SignData.SignDappData(updateValue)
+                    LedgerConnectVC.SignData.SignDappData(accountId, updateValue)
                 }
 
                 else -> {

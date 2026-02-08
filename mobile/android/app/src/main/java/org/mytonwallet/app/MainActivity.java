@@ -34,6 +34,7 @@ public class MainActivity extends BaseActivity {
     Log.i("MTWAirApplication", "Main Activity Created");
     super.onCreate(savedInstanceState);
 
+    LaunchConfig.recordAppOpened(this);
     Activity activity = this;
     boolean shouldStartOnAir = LaunchConfig.shouldStartOnAir(activity);
 
@@ -41,6 +42,7 @@ public class MainActivity extends BaseActivity {
     if (!shouldStartOnAir) {
       if (airLauncher != null) {
         airLauncher.switchingToClassic();
+        AirLauncher.setInstance(null);
       }
       // Open LegacyActivity and pass all the data there
       Intent intent = new Intent(activity, LegacyActivity.class);

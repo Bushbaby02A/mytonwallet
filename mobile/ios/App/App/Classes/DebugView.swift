@@ -22,8 +22,11 @@ private let log = Log("DebugView")
 struct DebugView: View {
     
     @State private var showDeleteAllAlert: Bool = false
-    @AppStorage("debug_languageSwitcher") private var languageSwitcher = false
-    
+    @AppStorage("debug_hideSegmentedControls") private var hideSegmentedControls = false
+    @AppStorage("debug_glassOpacity") var glassOpacity: Double = 1
+    @AppStorage("debug_gradientIsHidden") var gradientIsHidden: Bool = true
+    @AppStorage("debug_displayLogOverlay") private var displayLogOverlayEnabled = false
+
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -33,19 +36,19 @@ struct DebugView: View {
                 Section {
                     Button("Share logs") {
                         log.info("Share logs requested")
-                        logKeychainState()
-                        Task {
-                            do {
-                                let logs = try await LogStore.shared.exportFile()
-                                DispatchQueue.main.async {
-                                    let vc = UIActivityViewController(activityItems: [logs], applicationActivities: nil)
-                                    topViewController()?.present(vc, animated: true)
-                                }
-                            } catch {
-                                Log.shared.fault("failed to share logs \(error, .public)")
-                            }
-                        }
+                        Task { await onLogExport() }
                     }
+                } header: {
+                    Text("Logs")
+                }
+                
+                Section {
+                    Button("Add Testnet account") {
+                        dismiss()
+                        AppActions.showAddWallet(network: .testnet, showCreateWallet: true, showSwitchToOtherVersion: false)
+                    }
+                } header: {
+                    Text("Testnet")
                 }
                 
                 Section {
@@ -76,6 +79,17 @@ struct DebugView: View {
                         }
                     }
                 }
+                
+                // MARK: - TestFlight or debug
+                
+                if IS_DEBUG_OR_TESTFLIGHT {
+                    Section {} footer: {
+                        Text("**TESTFLIGHT ONLY**")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                
+                // MARK: - Debug only
 
 #if DEBUG
                 Section {} footer: {
@@ -84,10 +98,17 @@ struct DebugView: View {
                 }
                 
                 Section {
+                    Toggle("Display log overlay", isOn: $displayLogOverlayEnabled)
+                }
+                .onChange(of: displayLogOverlayEnabled) { isEnabled in
+                    setDisplayLogOverlayEnabled(isEnabled)
+                }
+
+                Section {
                     Button("Reactivate current account") {
                         Task {
                             log.info("Reactivate current account")
-//                            try! await AccountStore.reactivateCurrentAccount()
+                            try! await AccountStore.reactivateCurrentAccount()
                         }
                     }
                 }
@@ -111,10 +132,10 @@ struct DebugView: View {
                 }
 
                 Section {
-//                    Button("Delete credentials & exit", role: .destructive) {
-//                        WalletContext.KeychainWrapper.wipeKeychain()
-//                        exit(0)
-//                    }
+                    Button("Delete credentials & exit", role: .destructive) {
+                        WalletContext.KeychainWrapper.wipeKeychain()
+                        exit(0)
+                    }
                     
                     Button("Delete globalStorage & exit", role: .destructive) {
                         Task {
@@ -127,26 +148,6 @@ struct DebugView: View {
                         }
                     }
                 }
-                
-//                Section {
-//                    EmptyView()
-//                } footer: {
-//                    let accs = KeychainStorageProvider.get(key: "accounts")
-//                    let credentials = CapacitorCredentialsStorage.getCredentials()
-//                    let areCredentialsValid = credentials?.password.wholeMatch(of: /[0-9]{4}/) != nil || credentials?.password.wholeMatch(of: /[0-9]{6}/) != nil
-//                    
-//                    Text("""
-//                    keys=\(KeychainStorageProvider.keys())
-//                    stateVersion=\(KeychainStorageProvider.get(key: "stateVersion"))
-//                    currentAccountId=\(KeychainStorageProvider.get(key: "currentAccountId"))
-//                    clientId=\(KeychainStorageProvider.get(key: "clientId"))
-//                    baseCurrency=\(KeychainStorageProvider.get(key: "baseCurrency"))
-//                    accounts=\(accs.0) len=\(accs.1?.count ?? -1)
-//                    credentials discovered=\(credentials != nil) valid=\(areCredentialsValid)
-//                    """)
-//                    .font(.footnote.monospaced())
-//                    .foregroundStyle(.secondary)
-//                }
 #endif                
             }
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -155,29 +156,57 @@ struct DebugView: View {
             .listStyle(.insetGrouped)
             .navigationTitle(Text("Debug menu"))
             .navigationBarTitleDisplayMode(.large)
+            .navigationBarItems(trailing: Button("", systemImage: "xmark", action: { dismiss() }))
+        }
+    }
+    
+    func onLogExport() async {
+        logKeychainState()
+        logAccountState()
+        LogStore.shared.syncronize()
+        do {
+            let logs = try await LogStore.shared.exportFile()
+            await MainActor.run {
+                let vc = UIActivityViewController(activityItems: [logs], applicationActivities: nil)
+                topViewController()?.present(vc, animated: true)
+            }
+        } catch {
+            Log.shared.fault("failed to share logs \(error, .public)")
         }
     }
     
     func logKeychainState() {
-        log.info("\(KeychainStorageProvider as Any, .public)")
-        log.info("\(KeychainStorageProvider.keys() as Any, .public)")
+        log.info("keychain state:")
+        log.info("keys = \(KeychainStorageProvider.keys() as Any, .public)")
         log.info("stateVersion = \(KeychainStorageProvider.get(key: "stateVersion") as Any, .public)")
         log.info("currentAccountId = \(KeychainStorageProvider.get(key: "currentAccountId") as Any, .public)")
         log.info("clientId = \(KeychainStorageProvider.get(key: "clientId") as Any, .public)")
         log.info("baseCurrency = \(KeychainStorageProvider.get(key: "baseCurrency") as Any, .public)")
         let accs = KeychainStorageProvider.get(key: "accounts")
-        log.info("accounts = \(accs.0 as Any) \(accs.1?.count as Any)")
+        var accountIdsInKeychain: [String]?
+        if let value = accs.1, let keys = try? (JSONSerialization.jsonObject(withString: value) as? [String: Any])?.keys {
+            accountIdsInKeychain = Array(keys)
+        }
+        log.info("accounts = \(accs.0 as Any) length=\(accs.1?.count ?? -1)")
+        log.info("accountIds in keychain = \(accountIdsInKeychain?.jsonString() ?? "<accounts is not a valid dict>", .public)")
         
         let areCredentialsValid: Bool
         if let credentials = CapacitorCredentialsStorage.getCredentials() {
-            log.info("credentials discovered username=\(credentials.username, .public) password=\(credentials.password, .redacted) password.count=\(credentials.password.count)")
+            log.info("credentials discovered username = \(credentials.username, .public) password.count = \(credentials.password.count)")
             areCredentialsValid = credentials.password.wholeMatch(of: /[0-9]{4}/) != nil || credentials.password.wholeMatch(of: /[0-9]{6}/) != nil
         } else {
-            log.error("credentials do not exist")
+            log.info("credentials do not exist")
             areCredentialsValid = false
         }
-        if areCredentialsValid == false {
-            log.error("credentials are invalid")
-        }
+        log.info("areCredentialsValid = \(areCredentialsValid)")
+    }
+    
+    func logAccountState() {
+        log.info("account state:")
+        log.info("currentAccountId = \(AccountStore.accountId ?? "<AccountStore.accountId is nil>", .public)")
+        let orderedAccountIds = AccountStore.orderedAccountIds
+        log.info("orderedAccountIds = #\(orderedAccountIds.count) \(orderedAccountIds.jsonString(), .public)")
+        let accountsById = AccountStore.accountsById
+        log.info("accountsById = #\(accountsById.count) \(accountsById.jsonString(), .public)")
     }
 }

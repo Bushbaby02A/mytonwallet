@@ -3,8 +3,8 @@ package org.mytonwallet.app_air.walletcore.models
 import org.json.JSONObject
 import org.mytonwallet.app_air.walletbasecontext.utils.doubleAbsRepresentation
 import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcontext.utils.WEquatable
-import org.mytonwallet.app_air.walletcore.ALWAYS_SHOWN_TOKENS
 import org.mytonwallet.app_air.walletcore.DEFAULT_SHOWN_TOKENS
 import org.mytonwallet.app_air.walletcore.MYCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.PRICELESS_TOKEN_HASHES
@@ -14,8 +14,6 @@ import org.mytonwallet.app_air.walletcore.STAKE_SLUG
 import org.mytonwallet.app_air.walletcore.TONCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.TRON_USDT_SLUG
 import org.mytonwallet.app_air.walletcore.USDE_SLUG
-import org.mytonwallet.app_air.walletcore.WalletCore
-import org.mytonwallet.app_air.walletcore.helpers.ExplorerHelpers
 import org.mytonwallet.app_air.walletcore.moshi.IApiToken
 import org.mytonwallet.app_air.walletcore.stores.AccountStore
 import org.mytonwallet.app_air.walletcore.stores.BalanceStore
@@ -121,28 +119,30 @@ class MToken(json: JSONObject) : IApiToken, WEquatable<MToken> {
         return dict
     }
 
-    fun isHidden(): Boolean {
-        val shouldHide = AccountStore.assetsAndActivityData.hiddenTokens.contains(slug)
+    fun isHidden(
+        account: MAccount? = null,
+        assetsAndActivityData: MAssetsAndActivityData? = null
+    ): Boolean {
+        val account = account ?: AccountStore.activeAccount ?: return true
+        val assetsAndActivityData = assetsAndActivityData ?: AccountStore.assetsAndActivityData
+        val shouldHide = assetsAndActivityData.hiddenTokens.contains(slug)
         if (shouldHide) {
             return true
         }
-        val isVisibleToken = AccountStore.assetsAndActivityData.visibleTokens.contains(slug)
+        val isVisibleToken = assetsAndActivityData.visibleTokens.contains(slug)
         if (isVisibleToken) {
             return false
         }
-        if ((ALWAYS_SHOWN_TOKENS.contains(slug) &&
-                AccountStore.activeAccount?.addressByChain?.contains(chain) == true) ||
-            (DEFAULT_SHOWN_TOKENS.contains(slug) && AccountStore.activeAccount?.isNew == true)
-        )
+        if (DEFAULT_SHOWN_TOKENS[account.network]?.contains(slug) == true && account.isNew)
             return false
         if (PRICELESS_TOKEN_HASHES.contains(codeHash) &&
-            (BalanceStore.getBalances(AccountStore.activeAccountId)?.get(slug)
+            (BalanceStore.getBalances(account.accountId)?.get(slug)
                 ?: BigInteger.ZERO) > BigInteger.ZERO
         )
             return false
         if (WGlobalStorage.getAreNoCostTokensHidden()) {
-            val tokenBalance = (BalanceStore.getBalances(AccountStore.activeAccountId)?.get(slug)
-                ?: BigInteger.ZERO)
+            val tokenBalance =
+                (BalanceStore.getBalances(account.accountId)?.get(slug) ?: BigInteger.ZERO)
             return priceUsd * tokenBalance.doubleAbsRepresentation(decimals) < 0.01
         }
         return false
@@ -160,29 +160,13 @@ class MToken(json: JSONObject) : IApiToken, WEquatable<MToken> {
             return chain == "ton" || (chain == "tron" && AccountStore.activeAccount?.tronAddress?.isNotBlank() == true)
         }
 
-    val explorerUrl: String?
-        get() {
-            if (tokenAddress.isNullOrEmpty() && cmcSlug != null)
-                return "https://coinmarketcap.com/currencies/${cmcSlug}/"
+    fun explorerUrl(network: MBlockchainNetwork): String? {
+        if (tokenAddress.isNullOrEmpty() && cmcSlug != null)
+            return "https://coinmarketcap.com/currencies/${cmcSlug}/"
 
-            val chain = MBlockchain.valueOf(chain)
-
-            return when (chain) {
-                MBlockchain.ton -> {
-                    val domain = ExplorerHelpers.tonScanUrl(WalletCore.activeNetwork)
-                    "${domain}jetton/${tokenAddress}"
-                }
-
-                MBlockchain.tron -> {
-                    val domain = ExplorerHelpers.tronScanUrl(WalletCore.activeNetwork)
-                    return "${domain}token20/${tokenAddress}"
-                }
-
-                else -> {
-                    return null
-                }
-            }
-        }
+        val tokenAddress = tokenAddress ?: return null
+        return MBlockchain.valueOf(chain).tokenExplorer()?.tokenUrl(network, tokenAddress)
+    }
 
     val isEarnAvailable: Boolean
         get() {

@@ -1,27 +1,28 @@
+import Perception
 import SwiftUI
-import UIKit
 import UIComponents
+import UIKit
 import WalletContext
 import WalletCore
 
 @MainActor
-final class NftDetailsViewModel: ObservableObject {
-    
+@Perceptible
+final class NftDetailsViewModel {
+
     enum State {
         case collapsed
         case expanded
         case preview
     }
-   
-    @Published var isExpanded = true
-    @Published var nft: ApiNft
-    @Published var navigationBarInset: CGFloat
-    @Published var safeAreaInsets: UIEdgeInsets = .zero
-    @Published var y: CGFloat = 0
-    @Published var isFullscreenPreviewOpen = false
-    @Published var selectedSubmenu: String?
-    @Published var contentHeight: CGFloat = 2000.0
-    @Published var isAnimatingSince: Date?
+
+    var isExpanded = true
+    var nft: ApiNft
+    var safeAreaInsets: UIEdgeInsets = .zero
+    var y: CGFloat = 0
+    var isFullscreenPreviewOpen = false
+    var selectedSubmenu: String?
+    var contentHeight: CGFloat = 2000.0
+    var isAnimatingSince: Date?
     
     var isAnimating: Bool { isAnimatingSince != nil }
     
@@ -34,18 +35,30 @@ final class NftDetailsViewModel: ObservableObject {
     var shouldScaleOnDrag: Bool { isExpanded && !isFullscreenPreviewOpen }
     var shouldMaskAndClip: Bool { !isExpanded && !isFullscreenPreviewOpen }
     var shouldShowControls: Bool { !isFullscreenPreviewOpen }
-    
+
+    @PerceptionIgnored
     weak var viewController: NftDetailsVC?
-    
-    init(isExpanded: Bool = true, isFullscreenPreviewOpen: Bool = false, nft: ApiNft, listContext: NftCollectionFilter, navigationBarInset: CGFloat) {
+
+    @PerceptionIgnored
+    @AccountContext var account: MAccount
+
+    init(
+        accountId: String,
+        isExpanded: Bool = true,
+        isFullscreenPreviewOpen: Bool = false,
+        nft: ApiNft,
+        listContext: NftCollectionFilter
+    ) {
+        self._account = AccountContext(accountId: accountId)
         self.isExpanded = isExpanded
         self.isFullscreenPreviewOpen = isFullscreenPreviewOpen
         self.nft = nft
-        self.listContextProvider = NftListContextProvider(filter: listContext)
-        self.navigationBarInset = navigationBarInset
+        self.listContextProvider = NftListContextProvider(accountId: accountId, filter: listContext)
     }
     
-    var onHeightChange: (CGFloat) -> () = { _ in }
+    var collapsedTopInset: CGFloat {
+        safeAreaInsets.top - 8
+    }
     
     func onImageTap() {
         switch state {
@@ -64,7 +77,7 @@ final class NftDetailsViewModel: ObservableObject {
     
     func onImageLongTap() {
         if !isExpanded && !isFullscreenPreviewOpen {
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            Haptics.play(.drag)
             withAnimation(.spring(duration: 0.3)) {
                 isFullscreenPreviewOpen = true
             }

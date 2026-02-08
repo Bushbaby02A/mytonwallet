@@ -9,8 +9,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import org.mytonwallet.app_air.uicomponents.base.WViewController
+import org.mytonwallet.app_air.uicomponents.base.showAlert
 import org.mytonwallet.app_air.uicomponents.commonViews.AddressInputLayout
+import org.mytonwallet.app_air.uicomponents.extensions.atMost
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import org.mytonwallet.app_air.uicomponents.extensions.unspecified
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.widgets.WAnimationView
 import org.mytonwallet.app_air.uicomponents.widgets.WButton
@@ -27,7 +30,7 @@ import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletbasecontext.utils.toProcessedSpannableStringBuilder
 import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
-import org.mytonwallet.app_air.walletcore.MAIN_NETWORK
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
 import org.mytonwallet.app_air.walletcore.api.activateAccount
@@ -37,8 +40,13 @@ import org.mytonwallet.app_air.walletcore.moshi.api.ApiMethod
 import org.mytonwallet.app_air.walletcore.pushNotifications.AirPushNotifications
 import java.lang.ref.WeakReference
 
-class ImportViewWalletVC(context: Context, private val isOnIntro: Boolean) :
+class ImportViewWalletVC(
+    context: Context,
+    private val network: MBlockchainNetwork,
+    private val isOnIntro: Boolean
+) :
     WViewController(context) {
+    override val TAG = "ImportViewWallet"
 
     override val shouldDisplayTopBar = false
 
@@ -51,16 +59,25 @@ class ImportViewWalletVC(context: Context, private val isOnIntro: Boolean) :
     }
 
     val titleLabel = WLabel(context).apply {
-        setStyle(28f, WFont.Medium)
-        text = LocaleController.getString("View Any Address")
+        setStyle(28f, WFont.SemiBold)
+        text = LocaleController.getString("View Any Address") + network.localizedIdentifier
         gravity = Gravity.CENTER
         setTextColor(WColor.PrimaryText)
     }
 
     val subtitleLabel = WLabel(context).apply {
         setStyle(17f, WFont.Regular)
-        text = LocaleController.getString("\$import_view_account_note")
-            .toProcessedSpannableStringBuilder()
+        text = LocaleController.getStringWithKeyValues(
+            "\$import_view_account_note", listOf(
+                Pair(
+                    "%chains%",
+                    LocaleController.getFormattedEnumeration(
+                        MBlockchain.supportedChains.map { it.displayName },
+                        "or"
+                    )
+                )
+            )
+        ).toProcessedSpannableStringBuilder()
         gravity = Gravity.CENTER
         setTextColor(WColor.PrimaryText)
         setLineHeight(TypedValue.COMPLEX_UNIT_SP, 26f)
@@ -123,6 +140,7 @@ class ImportViewWalletVC(context: Context, private val isOnIntro: Boolean) :
             constrainMaxHeight(addressInputView.id, 80.dp)
             toCenterX(continueButton, 20f)
             topToTop(continueButton, addressInputView, 112f)
+            toBottomPx(continueButton, 16.dp + (navigationController?.getSystemBars()?.bottom ?: 0))
         }
 
         addressInputView.addTextChangedListener(onInputTextWatcher)
@@ -135,14 +153,8 @@ class ImportViewWalletVC(context: Context, private val isOnIntro: Boolean) :
     override fun getModalHalfExpandedHeight(): Int? {
         if (cachedHeight > 0)
             return cachedHeight
-        titleLabel.measure(
-            View.MeasureSpec.makeMeasureSpec(view.width - 64.dp, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
-        subtitleLabel.measure(
-            View.MeasureSpec.makeMeasureSpec(view.width - 64.dp, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
+        titleLabel.measure((view.width - 64.dp).atMost, 0.unspecified)
+        subtitleLabel.measure((view.width - 64.dp).atMost, 0.unspecified)
 
         val titleHeight = titleLabel.measuredHeight.coerceAtLeast(1)
         val subtitleHeight = subtitleLabel.measuredHeight.coerceAtLeast(1)
@@ -182,14 +194,23 @@ class ImportViewWalletVC(context: Context, private val isOnIntro: Boolean) :
         view.lockView()
         continueButton.isLoading = true
         WalletCore.call(
-            ApiMethod.Auth.ImportViewAccount(MAIN_NETWORK, addressByChain),
+            ApiMethod.Auth.ImportViewAccount(network, addressByChain),
             callback = { result, error ->
                 if (result == null || error != null) {
                     view.unlockView()
                     continueButton.isLoading = false
                     continueButton.isEnabled = false
-                    continueButton.text =
-                        error?.parsed?.toShortLocalized ?: LocaleController.getString("Continue")
+                    error?.parsed?.toShortLocalized?.let { it ->
+                        continueButton.text = error.parsed.toShortLocalized
+                    } ?: run {
+                        continueButton.text = LocaleController.getString("Continue")
+                        error?.parsed?.toLocalized?.let { it ->
+                            showAlert(
+                                title = LocaleController.getString("Error"),
+                                text = it
+                            )
+                        }
+                    }
                     return@call
                 }
                 Logger.d(

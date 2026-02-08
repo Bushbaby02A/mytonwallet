@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
 import android.text.SpannableStringBuilder
@@ -37,28 +38,36 @@ import org.mytonwallet.app_air.uicomponents.AnimationConstants
 import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
 import org.mytonwallet.app_air.uicomponents.base.WNavigationController
 import org.mytonwallet.app_air.uicomponents.base.WViewController
+import org.mytonwallet.app_air.uicomponents.commonViews.ReversedCornerView
+import org.mytonwallet.app_air.uicomponents.commonViews.cells.HeaderCell
 import org.mytonwallet.app_air.uicomponents.drawable.RotatableDrawable
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import org.mytonwallet.app_air.uicomponents.extensions.exactly
 import org.mytonwallet.app_air.uicomponents.extensions.resize
+import org.mytonwallet.app_air.uicomponents.extensions.unspecified
 import org.mytonwallet.app_air.uicomponents.helpers.DirectionalTouchHandler
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.helpers.palette.ImagePaletteHelpers
 import org.mytonwallet.app_air.uicomponents.image.Content
 import org.mytonwallet.app_air.uicomponents.viewControllers.preview.PreviewVC
+import org.mytonwallet.app_air.uicomponents.widgets.WFrameLayout
 import org.mytonwallet.app_air.uicomponents.widgets.WImageButton
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WView
 import org.mytonwallet.app_air.uicomponents.widgets.addRippleEffect
 import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup
+import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup.BackgroundStyle
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
 import org.mytonwallet.app_air.uisend.sendNft.SendNftVC
 import org.mytonwallet.app_air.uisend.sendNft.sendNftConfirm.ConfirmNftVC
-import org.mytonwallet.app_air.walletcontext.WalletContextManager
-import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
+import org.mytonwallet.app_air.walletbasecontext.theme.NftAccentColors
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletcontext.WalletContextManager
+import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcontext.utils.AnimUtils.Companion.lerp
 import org.mytonwallet.app_air.walletcontext.utils.VerticalImageSpan
 import org.mytonwallet.app_air.walletcore.WalletCore
@@ -73,10 +82,19 @@ import kotlin.math.max
 
 class NftVC(
     context: Context,
+    val showingAccountId: String,
     var nft: ApiNft,
     val collectionNFTs: List<ApiNft>
 ) : WViewController(context), NftHeaderView.Delegate {
+    override val TAG = "Nft"
 
+    override val displayedAccount =
+        DisplayedAccount(showingAccountId, AccountStore.isPushedTemporary)
+
+    override val topBarConfiguration: ReversedCornerView.Config
+        get() = super.topBarConfiguration.copy(
+            blurRootView = recyclerView
+        )
     override val shouldDisplayBottomBar = true
     override val isSwipeBackAllowed: Boolean
         get() {
@@ -126,12 +144,12 @@ class NftVC(
         btn
     }
 
-    private val descriptionTitleLabel: WLabel by lazy {
-        WLabel(context).apply {
-            setStyle(16f, WFont.Medium)
-            setTextColor(WColor.Tint)
-            text = LocaleController.getString("Description")
-        }
+    private val descriptionTitleLabel = HeaderCell(context).apply {
+        configure(
+            LocaleController.getString("Description"),
+            titleColor = WColor.Tint,
+            HeaderCell.TopRounding.NORMAL
+        )
     }
     private val descriptionLabel: WLabel by lazy {
         WLabel(context).apply {
@@ -147,34 +165,34 @@ class NftVC(
                 LayoutParams(MATCH_PARENT, WRAP_CONTENT)
             )
             setConstraints {
-                toTop(descriptionTitleLabel, 16f)
-                toStart(descriptionTitleLabel, 24f)
+                toTop(descriptionTitleLabel)
+                toStart(descriptionTitleLabel)
                 toTop(descriptionLabel, 48f)
-                toCenterX(descriptionLabel, 24f)
+                toCenterX(descriptionLabel, 20f)
                 toBottom(descriptionLabel, 16f)
             }
         }
     }
 
-    private val attributesTitleLabel: WLabel by lazy {
-        WLabel(context).apply {
-            setStyle(16f, WFont.Medium)
-            setTextColor(WColor.Tint)
-            text = LocaleController.getString("Attributes")
-        }
+    private val attributesTitleLabel = HeaderCell(context).apply {
+        configure(
+            LocaleController.getString("Attributes"),
+            titleColor = WColor.Tint,
+            HeaderCell.TopRounding.NORMAL
+        )
     }
     private val attributesContentView = NftAttributesView(context)
     private val attributesToggleLabel by lazy {
         WLabel(context).apply {
             setStyle(15f, WFont.Medium)
             setTextColor(WColor.Tint)
+            isTinted = true
         }
     }
     private var arrowDrawable: RotatableDrawable? = null
     private var isAttributesSectionExpanded = false
-    private val attributesToggleView: FrameLayout by lazy {
-        FrameLayout(context).apply {
-            id = View.generateViewId()
+    private val attributesToggleView: WFrameLayout by lazy {
+        WFrameLayout(context).apply {
             addView(
                 attributesToggleLabel,
                 FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
@@ -216,10 +234,10 @@ class NftVC(
             addView(attributesContentView, LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             addView(attributesToggleView, LayoutParams(MATCH_PARENT, 42.dp))
             setConstraints {
-                toTop(attributesTitleLabel, 16f)
-                toStart(attributesTitleLabel, 24f)
+                toTop(attributesTitleLabel)
+                toStart(attributesTitleLabel)
                 toCenterX(attributesContentView, 16f)
-                toTop(attributesContentView, 52f)
+                toTop(attributesContentView, 48f)
             }
         }
     }
@@ -246,7 +264,10 @@ class NftVC(
             setOnClickListener {
                 val shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType("text/plain")
-                shareIntent.putExtra(Intent.EXTRA_TEXT, nft.tonscanUrl)
+                shareIntent.putExtra(
+                    Intent.EXTRA_TEXT,
+                    nft.scanUrl(MBlockchainNetwork.ofAccountId(showingAccountId))
+                )
                 window?.startActivity(
                     Intent.createChooser(
                         shareIntent,
@@ -357,13 +378,13 @@ class NftVC(
 
     private val touchHandler by lazy {
         DirectionalTouchHandler(
-            recyclerView,
-            headerView.avatarCoverFlowView,
-            listOf(headerView.avatarImageView),
-            listOf(headerView.avatarCoverFlowView)
-        ) {
-            !nft.description.isNullOrEmpty() || !nft.metadata?.attributes.isNullOrEmpty()
-        }
+            verticalView = recyclerView,
+            horizontalView = headerView.avatarCoverFlowView,
+            interceptedViews = listOf(headerView.avatarImageView),
+            interceptedByVerticalScrollViews = listOf(headerView.avatarCoverFlowView),
+            isDirectionalScrollAllowed = { isVertical, _ ->
+                !isVertical || (!nft.description.isNullOrEmpty() || !nft.metadata?.attributes.isNullOrEmpty())
+            })
     }
 
     private var shouldLimitFling = false
@@ -430,11 +451,8 @@ class NftVC(
         // Add enough bottom padding to prevent recycler-view scroll before calculating and setting the correct padding
         scrollingContentView.setPadding(0, scrollingContentView.paddingTop, 0, view.height)
         attributesContentView.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                scrollingContentView.width - 32.dp,
-                View.MeasureSpec.EXACTLY
-            ),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            (scrollingContentView.width - 32.dp).exactly,
+            0.unspecified
         )
         if (isAttributesSectionExpandable) {
             attributesContentView.updateLayoutParams {
@@ -529,6 +547,10 @@ class NftVC(
         super.scrollToTop()
         if (wasTracking || !headerView.targetIsCollapsed)
             return
+        performScrollToTop()
+    }
+
+    private fun performScrollToTop() {
         recyclerView.smoothScrollBy(
             0,
             headerView.collapsedOffset - recyclerView.computeVerticalScrollOffset(),
@@ -603,10 +625,11 @@ class NftVC(
             )
     }
 
+    override val isTinted = true
     override fun updateTheme() {
         super.updateTheme()
 
-        view.setBackgroundColor(WColor.SecondaryBackground.color)
+        recyclerView.setBackgroundColor(WColor.SecondaryBackground.color)
         descriptionView.setBackgroundColor(
             WColor.Background.color,
             if (headerView.targetIsCollapsed) ViewConstants.BIG_RADIUS.dp else 0f,
@@ -655,7 +678,12 @@ class NftVC(
                 context,
                 org.mytonwallet.app_air.uiassets.R.drawable.ic_nft_wear
             )!!.apply {
-                setTint(Color.WHITE)
+                setTint(
+                    if (!NftAccentColors.veryBrightColors.contains(WColor.Tint.color))
+                        Color.WHITE
+                    else
+                        Color.BLACK
+                )
             }
         )
         wearActionButton.setBackgroundColor(WColor.Tint.color, 28f.dp)
@@ -741,7 +769,7 @@ class NftVC(
         val txt =
             LocaleController.getString(if (isAttributesSectionExpanded) "Collapse" else "Show All")
         val ss = SpannableStringBuilder(txt)
-        val imageSpan = VerticalImageSpan(arrowDrawable, 3.dp, 3.dp)
+        val imageSpan = VerticalImageSpan(arrowDrawable as Drawable, 3.dp, 3.dp)
         ss.append(" ", imageSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         attributesToggleLabel.text = ss
         attributesToggleView.background = null
@@ -767,6 +795,14 @@ class NftVC(
         } else {
             onPreviewTapped()
         }
+    }
+
+    override fun onBackPressed(): Boolean {
+        if (!headerView.targetIsCollapsed) {
+            performScrollToTop()
+            return false
+        }
+        return super.onBackPressed()
     }
 
     override fun onPreviewTapped() {
@@ -820,6 +856,7 @@ class NftVC(
             push(
                 AssetsVC(
                     context,
+                    showingAccountId,
                     AssetsVC.Mode.COMPLETE,
                     collectionMode = AssetsVC.CollectionMode.SingleCollection(
                         NftCollection(collectionAddress, nft.collectionName ?: "")
@@ -909,7 +946,7 @@ class NftVC(
                     ),
                     nft.isTonDns != true,
                 ) {
-                    openLink(nft.tonscanUrl)
+                    openLink(nft.scanUrl(MBlockchainNetwork.ofAccountId(showingAccountId)))
                 },
             ).apply {
                 if (nft.isOnFragment == true) {
@@ -1004,7 +1041,7 @@ class NftVC(
                         })
             },
             popupWidth = WRAP_CONTENT,
-            aboveView = true
+            positioning = WMenuPopup.Positioning.ALIGNED
         )
     }
 
@@ -1030,13 +1067,13 @@ class NftVC(
                 ) {
                     if (nft.isInstalledMtwCard) {
                         WGlobalStorage.setCardBackgroundNft(
-                            AccountStore.activeAccountId!!,
+                            showingAccountId,
                             null
                         )
                         resetPalette()
                     } else {
                         WGlobalStorage.setCardBackgroundNft(
-                            AccountStore.activeAccountId!!,
+                            showingAccountId,
                             nft.toDictionary()
                         )
                         if (!nft.isInstalledMtwCardPalette) {
@@ -1068,9 +1105,13 @@ class NftVC(
                     }
                 },
             ),
-            verticalOffset = 2.dp,
+            yOffset = 2.dp,
             popupWidth = WRAP_CONTENT,
-            aboveView = false
+            positioning = WMenuPopup.Positioning.BELOW,
+            windowBackgroundStyle = BackgroundStyle.Cutout.fromView(
+                wearActionButton,
+                roundRadius = WEAR_ITEM_SIZE.dp.toFloat()
+            )
         )
     }
 
@@ -1085,7 +1126,7 @@ class NftVC(
             isInstallingPaletteColor = false
             if (colorIndex != null) {
                 WGlobalStorage.setNftAccentColor(
-                    AccountStore.activeAccountId!!,
+                    showingAccountId,
                     colorIndex,
                     nft.toDictionary()
                 )
@@ -1096,7 +1137,7 @@ class NftVC(
 
     private fun resetPalette() {
         WGlobalStorage.setNftAccentColor(
-            AccountStore.activeAccountId!!,
+            showingAccountId,
             null,
             null
         )

@@ -17,4 +17,22 @@ extension Api {
     internal static func fetchActivityDetails(accountId: String, activity: ApiActivity) async throws -> ApiActivity {
         try await bridge.callApi("fetchActivityDetails", accountId, activity, decoding: ApiActivity.self)
     }
+    
+    public static func fetchTransactionById(chain: ApiChain, network: ApiNetwork, txId: String, walletAddress: String) async throws -> [ApiActivity] {
+        let options = ApiFetchTransactionByIdOptions(chain: chain, network: network, walletAddress: walletAddress, txId: txId)
+        return try await bridge.callApi("fetchTransactionById", options, decoding: [ApiActivity].self)
+    }
+
+    public static func fetchTransactionById(chain: ApiChain, network: ApiNetwork, txHash: String, walletAddress: String) async throws -> [ApiActivity] {
+        let options = ApiFetchTransactionByIdOptions(chain: chain, network: network, walletAddress: walletAddress, txHash: txHash)
+        return try await bridge.callApi("fetchTransactionById", options, decoding: [ApiActivity].self)
+    }
+}
+
+private struct ApiFetchTransactionByIdOptions: Encodable {
+    var chain: ApiChain
+    var network: ApiNetwork
+    var walletAddress: String
+    var txId: String?
+    var txHash: String?
 }

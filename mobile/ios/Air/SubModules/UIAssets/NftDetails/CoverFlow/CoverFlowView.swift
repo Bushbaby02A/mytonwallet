@@ -9,10 +9,11 @@ import UIKit
 import SwiftUI
 import UIComponents
 import WalletContext
+import Perception
 import WalletCore
 import Combine
 
-private let itemSize: CGFloat = 144.0
+private let itemSize = collapsedImageSize
 private let itemSpacing: CGFloat = 84.0
 private let rotationSensitivity: Double = 1.7
 private let rotationAngle: Double = Angle.degrees(-15).radians
@@ -29,6 +30,7 @@ class _CoverFlowView: UIView, UICollectionViewDelegate {
     var onSelect: (String) -> ()
     var selectedIdx = 0
     var selectedId: String?
+    var hasInitialized = false
     
     enum Section: Hashable {
         case main
@@ -59,24 +61,19 @@ class _CoverFlowView: UIView, UICollectionViewDelegate {
     func setup() {
         translatesAutoresizingMaskIntoConstraints = false
         
-        let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .absolute(itemSize), heightDimension: .absolute(itemSize)))
-        
         let group = NSCollectionLayoutGroup.custom(layoutSize: .init(widthDimension: .absolute(itemSpacing), heightDimension: .absolute(itemSize))) { [itemSize, itemSpacing] env in
             [NSCollectionLayoutGroupCustomItem(frame: CGRectMake(-(itemSize-itemSpacing)/2, 0, itemSize, itemSize))]
         }
         let section = NSCollectionLayoutSection(group: group)
         section.orthogonalScrollingBehavior = .continuousGroupLeadingBoundary
-//        section.contentInsets = .init(top: 0, leading: 220, bottom: 0, trailing: 280)
         if #available(iOS 17.0, *) {
             section.orthogonalScrollingProperties.decelerationRate = .fast
         }
-        let inset: CGFloat = (UIScreen.main.bounds.width - itemSpacing - 2 * negativeHorizontalInset)/2
+        let inset: CGFloat = (screenWidth - itemSpacing - 2 * negativeHorizontalInset)/2
         section.contentInsets = .init(top: 0, leading: inset, bottom: inset, trailing: inset)
         
-        var date = Date()
         section.visibleItemsInvalidationHandler = { [unowned self] items, scrollOffset, env in
             guard !items.isEmpty else { return }
-            let now = Date()
             var minDistance: CGFloat = .infinity
             var minDistanceIndex = 0
             
@@ -91,7 +88,6 @@ class _CoverFlowView: UIView, UICollectionViewDelegate {
                     minDistance = absDistance
                     minDistanceIndex = item.indexPath.row
                 }
-                
                 
                 let distance1 = position
                 let distance2 = sign * max(0, abs(distance1) - 1)
@@ -117,7 +113,6 @@ class _CoverFlowView: UIView, UICollectionViewDelegate {
                 
                 item.center.x = calculatedCenterX + offset
             }
-            date = now
             
             self.updateFocusedItem(idx: minDistanceIndex)
             scrollingUpdates.send(minDistance > 1e-3)
@@ -153,11 +148,13 @@ class _CoverFlowView: UIView, UICollectionViewDelegate {
             }
         }
         
-        var snapshot = dataSource.snapshot()
-        snapshot.appendSections([.main])
-        snapshot.appendItems(nftListContextProvider.nfts.map(\.id).map(Item.coverFlowItem))
-        
-        dataSource.apply(snapshot)
+        observe { [weak self] in
+            guard let self else { return }
+            var snapshot = dataSource.snapshot()
+            snapshot.appendSections([.main])
+            snapshot.appendItems(nftListContextProvider.nfts.map(\.id).map(Item.coverFlowItem))
+            dataSource.apply(snapshot)
+        }        
         
         addSubview(collectionView)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -195,36 +192,21 @@ class _CoverFlowView: UIView, UICollectionViewDelegate {
         collectionView.frame = self.bounds.insetBy(dx: negativeHorizontalInset, dy: 0)
     }
     
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-    }
-    
-    override func systemLayoutSizeFitting(_ targetSize: CGSize) -> CGSize {
-        return super.systemLayoutSizeFitting(targetSize)
-    }
-    
-    override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
-        return super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
-    }
-    
     override var intrinsicContentSize: CGSize {
         return CGSize(width: UIView.noIntrinsicMetric, height: itemSize)
     }
     
     func updateFocusedItem(idx: Int) {
         if idx != selectedIdx {
-            UISelectionFeedbackGenerator().selectionChanged()
+            if hasInitialized {
+                Haptics.play(.selection)
+            }
             selectedIdx = idx
+            hasInitialized = true
             if case .coverFlowItem(let id) = dataSource.itemIdentifier(for: IndexPath(item: idx, section: 0)) {
                 onSelect(id)
             }
         }
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        true
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
     }
     
     func scrollTo(_ id: String, animated: Bool) {
@@ -261,9 +243,11 @@ struct CoverFlowView: View {
     @State private var isScrolling = false
     
     var body: some View {
-        _CoverFlowViewRepresentable(viewModel: viewModel, selectedId: selectedId, onSelect: _onSelect, onIsScrolling: onIsScrolling)
-            .frame(maxWidth: .infinity)
-            .preference(key: CoverFlowIsScrollingPreference.self, value: isScrolling)
+        WithPerceptionTracking {
+            _CoverFlowViewRepresentable(viewModel: viewModel, selectedId: selectedId, onSelect: _onSelect, onIsScrolling: onIsScrolling)
+                .frame(maxWidth: .infinity)
+                .preference(key: CoverFlowIsScrollingPreference.self, value: isScrolling)
+        }
     }
     
     func onIsScrolling(_ isScrolling: Bool) {

@@ -21,6 +21,14 @@ public struct ApiNft: Equatable, Hashable, Codable, Sendable {
     public var isTelegramGift: Bool?
     public var isScam: Bool?
     public var metadata: ApiNftMetadata?
+    
+    public static func == (lhs: ApiNft, rhs: ApiNft) -> Bool {
+        lhs.address == rhs.address
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(address)
+    }
 }
 
 extension ApiNft {
@@ -66,7 +74,7 @@ public struct ApiNftMetadata: Equatable, Hashable, Codable, Sendable {
 
 extension ApiNftMetadata {
     public var mtwCardBackgroundUrl: URL? {
-        if let mtwCardId { return URL(string: "https://static.mytonwallet.org/cards/\(mtwCardId).webp")! }
+        if let mtwCardId { return URL(string: "https://static.mytonwallet.org/cards/v2/cards/\(mtwCardId).webp")! }
         return nil
     }
 }
@@ -111,17 +119,6 @@ extension ApiMtwCardType {
         self != .standard
     }
 }
-
-extension ApiNft: WEquatable {
-    public static func == (lhs: ApiNft, rhs: ApiNft) -> Bool {
-        lhs.address == rhs.address
-    }
-    
-    public func isChanged(comparing: ApiNft) -> Bool {
-        return isHidden != comparing.isHidden || isOnSale != comparing.isOnSale
-    }
-}
-
 
 public extension ApiNft {
     var isStandalone: Bool { collectionName?.nilIfEmpty == nil }

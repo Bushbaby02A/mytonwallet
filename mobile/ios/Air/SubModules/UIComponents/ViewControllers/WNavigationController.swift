@@ -7,6 +7,7 @@
 
 import UIKit
 import WalletContext
+import WalletCore
 
 class SlowedPanGestureRecognizer: UIPanGestureRecognizer {
     override func velocity(in view: UIView?) -> CGPoint {
@@ -50,11 +51,16 @@ open class WNavigationController: UINavigationController {
     }
     
     open override func popViewController(animated: Bool) -> UIViewController? {
-        if presentedViewController != nil, !(presentedViewController?.description.contains("MinimizableSheet") == true) {
-            log.error("Presenting a modal view controller. Will not pop to prevent freeze")
+        if let presentedViewController, presentedViewController.isBeingDismissed {
+            log.error("Dismissing a modal view controller. Will not pop to prevent freeze")
             return nil
         }
         return super.popViewController(animated: animated)
+    }
+    
+    open override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
+        super.dismiss(animated: flag, completion: completion)
+        WalletCoreData.notify(event: .sheetDismissed)
     }
 }
 

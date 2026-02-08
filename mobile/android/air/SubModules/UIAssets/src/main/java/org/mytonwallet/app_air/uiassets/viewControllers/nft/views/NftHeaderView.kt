@@ -14,7 +14,6 @@ import android.text.Spanned
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.animation.AccelerateDecelerateInterpolator
-import android.widget.FrameLayout
 import android.widget.ImageView.ScaleType
 import androidx.core.animation.doOnEnd
 import androidx.core.content.ContextCompat
@@ -27,12 +26,13 @@ import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
 import org.mytonwallet.app_air.uicomponents.extensions.animateTintColor
 import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
-import org.mytonwallet.app_air.uicomponents.extensions.updateDotsTypeface
+import org.mytonwallet.app_air.uicomponents.extensions.styleDots
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.image.Content
 import org.mytonwallet.app_air.uicomponents.image.WCustomImageView
 import org.mytonwallet.app_air.uicomponents.widgets.WAnimationView
 import org.mytonwallet.app_air.uicomponents.widgets.WBaseView
+import org.mytonwallet.app_air.uicomponents.widgets.WFrameLayout
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WThemedView
 import org.mytonwallet.app_air.uicomponents.widgets.addRippleEffect
@@ -62,7 +62,7 @@ open class NftHeaderView(
     safeAreaPadding: Int,
     val viewWidth: Int,
     val delegate: WeakReference<Delegate>,
-) : FrameLayout(context), WThemedView {
+) : WFrameLayout(context), WThemedView {
 
     interface Delegate {
         fun onNftChanged(nft: ApiNft)
@@ -226,7 +226,6 @@ open class NftHeaderView(
         }
 
     init {
-        id = generateViewId()
         addView(
             avatarCoverFlowView,
             LayoutParams(LayoutParams.MATCH_PARENT, 180.dp).apply {
@@ -318,7 +317,7 @@ open class NftHeaderView(
         animationView.isGone =
             !isAnimatedNft || avatarCoverFlowView.scrollState != WCoverFlowView.ScrollState.IDLE
         if (isAnimatedNft) {
-            animationView.playFromUrl(nft.metadata!!.lottie!!, onStart = {})
+            animationView.playFromUrl(nft.metadata!!.lottie!!, play = true, onStart = {})
         }
         updateTitleLabel()
         updateSubtitleText()
@@ -413,6 +412,7 @@ open class NftHeaderView(
     }
 
     fun onDestroy() {
+        avatarCoverFlowView.onDestroy()
     }
 
     fun onPreviewStarted() {
@@ -662,7 +662,7 @@ open class NftHeaderView(
     private fun updateTitleLabel() {
         titleLabel.text =
             nft.name ?: SpannableStringBuilder(nft.address.formatStartEndAddress()).apply {
-                updateDotsTypeface()
+                styleDots()
             }
         centerTitle()
     }

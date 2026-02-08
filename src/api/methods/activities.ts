@@ -1,9 +1,15 @@
-import type { ApiActivity, ApiChain, ApiFetchActivitySliceOptions, ApiTransactionActivity } from '../types';
+import type {
+  ApiActivity,
+  ApiChain,
+  ApiFetchActivitySliceOptions,
+  ApiFetchTransactionByIdOptions,
+  ApiTransactionActivity,
+} from '../types';
 
 import { DEBUG } from '../../config';
 import { getActivityChains } from '../../util/activities';
 import { areActivitiesSortedAndUnique, mergeSortedActivitiesToMaxTime } from '../../util/activities/order';
-import { logDebugError } from '../../util/logs';
+import { logDebug, logDebugError } from '../../util/logs';
 import { getChainBySlug } from '../../util/tokens';
 import chains from '../chains';
 import { fetchStoredAccount } from '../common/accounts';
@@ -78,6 +84,19 @@ export async function fetchActivityDetails(accountId: string, activity: ApiActiv
   }
 
   return activity;
+}
+
+export async function fetchTransactionById(
+  { chain, network, walletAddress, ...restOptions }: ApiFetchTransactionByIdOptions & { chain: ApiChain },
+): Promise<ApiActivity[]> {
+  const isTxId = 'txId' in restOptions;
+  const options = isTxId
+    ? { chain, network, txId: restOptions.txId, walletAddress }
+    : { chain, network, txHash: restOptions.txHash, walletAddress };
+
+  logDebug('fetchTransactionById', options);
+
+  return chains[chain].fetchTransactionById(options);
 }
 
 async function fetchAndCheckActivitySlice(chain: ApiChain, options: ApiFetchActivitySliceOptions) {

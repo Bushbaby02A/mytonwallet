@@ -32,7 +32,7 @@ class MainWindow : WWindow() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Logger.i(Logger.LogTag.AIR_APPLICATION, "MainWindow Created")
+        Logger.d(Logger.LogTag.AIR_APPLICATION, "MainWindow Created")
         super.onCreate(savedInstanceState)
 
         if (!WGlobalStorage.isInitialized) {
@@ -114,11 +114,11 @@ class MainWindow : WWindow() {
             ) == PackageManager.PERMISSION_GRANTED
         ) {
             // Permission already granted
-            AirPushNotifications.register()
+            AirPushNotifications.register(subscribePreviousAccountsIfEmpty = false)
         } else {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS)) { _, grantResults ->
                 if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    AirPushNotifications.register()
+                    AirPushNotifications.register(subscribePreviousAccountsIfEmpty = true)
                 }
             }
         }

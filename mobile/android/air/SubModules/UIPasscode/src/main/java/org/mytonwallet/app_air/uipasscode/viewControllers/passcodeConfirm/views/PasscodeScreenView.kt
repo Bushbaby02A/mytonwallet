@@ -14,6 +14,7 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.LinearLayout
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.constraintlayout.widget.ConstraintSet
+import androidx.core.animation.doOnEnd
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
 import androidx.fragment.app.FragmentActivity
@@ -34,14 +35,16 @@ import org.mytonwallet.app_air.uicomponents.widgets.WView
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
 import org.mytonwallet.app_air.uipasscode.commonViews.PasscodeInputView
 import org.mytonwallet.app_air.uipasscode.viewControllers.passcodeConfirm.PasscodeViewState
-import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
-import org.mytonwallet.app_air.walletcontext.helpers.BiometricHelpers
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
-import org.mytonwallet.app_air.walletcontext.secureStorage.WSecureStorage
+import org.mytonwallet.app_air.walletbasecontext.logger.Logger
+import org.mytonwallet.app_air.walletbasecontext.theme.NftAccentColors
 import org.mytonwallet.app_air.walletbasecontext.theme.ThemeManager
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
+import org.mytonwallet.app_air.walletcontext.globalStorage.WGlobalStorage
+import org.mytonwallet.app_air.walletcontext.helpers.BiometricHelpers
+import org.mytonwallet.app_air.walletcontext.secureStorage.WSecureStorage
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -55,6 +58,7 @@ class PasscodeScreenView(
 
     companion object {
         const val TOP_HEADER_MAX_HEIGHT_RATIO = 0.25f
+        const val ANIMATE_PINPAD = false
     }
 
     val allowBiometry =
@@ -102,6 +106,8 @@ class PasscodeScreenView(
         context,
         null,
         forceLightScreen = if (passcodeViewState is PasscodeViewState.Default) passcodeViewState.light == true else false,
+        forceDarkScreen = if (passcodeViewState is PasscodeViewState.Default && passcodeViewState.isUnlockScreen)
+            NftAccentColors.veryBrightColors.contains(WColor.Tint.color) else false,
         margins = 8,
         showKeyboardOnFocus = false
     ).apply {
@@ -196,10 +202,12 @@ class PasscodeScreenView(
         addView(gapView2, LayoutParams(WRAP_CONTENT, 0))
 
         if (showAnimation) {
-            passcodeKeyboardView.apply {
-                alpha = 0f
-                scaleX = 0f
-                scaleY = 0f
+            if (ANIMATE_PINPAD) {
+                passcodeKeyboardView.apply {
+                    alpha = 0f
+                    scaleX = 0f
+                    scaleY = 0f
+                }
             }
             passcodeInputView.apply {
                 scaleX = 0f
@@ -278,7 +286,7 @@ class PasscodeScreenView(
     }
 
     private fun setupAsCustomHeader() {
-        addView(gapView2, LayoutParams(WRAP_CONTENT, 8.dp))
+        addView(gapView2, LayoutParams(WRAP_CONTENT, ViewConstants.GAP.dp))
         bottomLayout.addView(
             subTitleTextView,
             LayoutParams(MATCH_PARENT, WRAP_CONTENT)
@@ -345,6 +353,14 @@ class PasscodeScreenView(
                     subTitleTextView.alpha = alpha
                 }
             }
+            doOnEnd {
+                passcodeInputView.scaleX = 1f
+                passcodeInputView.scaleY = 1f
+                titleTextView.translationX = 0f
+                subTitleTextView.translationX = 0f
+                titleTextView.alpha = 1f
+                subTitleTextView.alpha = 1f
+            }
 
             start()
         }
@@ -352,17 +368,11 @@ class PasscodeScreenView(
 
     override fun updateTheme() {
         if (passcodeViewState !is PasscodeViewState.Default) {
-            if (ThemeManager.uiMode.hasRoundedCorners) {
-                topLinearLayout.setBackgroundColor(
-                    WColor.Background.color,
-                    ViewConstants.TOP_RADIUS.dp,
-                    ViewConstants.BIG_RADIUS.dp,
-                )
-            } else {
-                topLinearLayout.background = SeparatorBackgroundDrawable().apply {
-                    backgroundWColor = WColor.Background
-                }
-            }
+            topLinearLayout.setBackgroundColor(
+                WColor.Background.color,
+                ViewConstants.TOP_RADIUS.dp,
+                ViewConstants.BIG_RADIUS.dp,
+            )
             bottomLayout.setBackgroundColor(
                 WColor.Background.color,
                 ViewConstants.BIG_RADIUS.dp,
@@ -449,12 +459,15 @@ class PasscodeScreenView(
         AnimatorUtils.DECELERATE_INTERPOLATOR,
         initialValue = showAnimation
     ) { _, value, _, _ ->
-        passcodeKeyboardView.alpha = 1f - value
-        passcodeKeyboardView.scaleX = 1f - value * 0.25f
-        passcodeKeyboardView.scaleY = 1f - value * 0.25f
+        if (ANIMATE_PINPAD) {
+            passcodeKeyboardView.alpha = 1f - value
+            passcodeKeyboardView.scaleX = 1f - value * 0.25f
+            passcodeKeyboardView.scaleY = 1f - value * 0.25f
+        }
     }
 
     fun tryBiometrics() {
+        Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "tryBiometrics: Attempting biometric authentication")
         inBiometry.animatedValue = true
 
         BiometricHelpers.authenticate(
@@ -464,10 +477,12 @@ class PasscodeScreenView(
             null,
             LocaleController.getString("Use PIN"),
             onSuccess = {
+                Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "tryBiometrics: Biometric success")
                 passcodeInputView.passcode = "----" // To fill passcode input view
                 checkPasscode(WSecureStorage.getBiometricPasscode(containerVC.window!!) ?: "")
             },
             onCanceled = {
+                Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "tryBiometrics: Biometric canceled")
                 inBiometry.animatedValue = false
             }
         )
@@ -484,13 +499,19 @@ class PasscodeScreenView(
 
     private fun checkPasscode(passcode: String) {
         if (isLoading.value) {
+            inBiometry.animatedValue = false
             return
         }
 
+        Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "checkPasscode: Verifying passcode")
         isLoading.animatedValue = true
         delegate!!.onEnterPasscode(passcode) { correct, cooldownDate ->
             isLoading.animatedValue = false
-            if (!correct) {
+            if (correct) {
+                Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "checkPasscode: Passcode correct")
+            } else {
+                Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "checkPasscode: Passcode incorrect hasCooldown=${cooldownDate != null}")
+                inBiometry.animatedValue = false
                 passcodeInputView.resetInput()
                 if ((passcodeViewState as? PasscodeViewState.Default)?.isUnlockScreen == true && cooldownDate != null)
                     passcodeKeyboardView.showSignOut = true
@@ -521,6 +542,7 @@ class PasscodeScreenView(
         val remainingMillis = cooldownEndTime?.let { it - System.currentTimeMillis() } ?: 0
 
         if (remainingMillis > 0) {
+            Logger.d(Logger.LogTag.PASSCODE_CONFIRM, "setupCooldown: Cooldown active remainingMs=$remainingMillis")
             passcodeKeyboardView.lockKeypad()
             startCooldownTimer(cooldownEndTime!!)
         } else {

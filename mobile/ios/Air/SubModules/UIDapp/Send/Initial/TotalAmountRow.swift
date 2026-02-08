@@ -10,7 +10,7 @@ public struct TotalAmountRow: View {
     var info: MDappSendTransactions.CombinedInfo
     
     var amountInBaseCurrency: BaseCurrencyAmount {
-        let baseCurrency = TokenStore.baseCurrency ?? .USD
+        let baseCurrency = TokenStore.baseCurrency
         var total: BigInt = 0
         for (tokenSlug, amount) in info.tokenTotals {
             if let token = TokenStore.tokens[tokenSlug] {
@@ -54,7 +54,7 @@ public struct TotalAmountRow: View {
         if !tokenAmounts.isEmpty {
             let _tokens = tokenAmounts
                 .map { tokenAmount in
-                    tokenAmount.formatted()
+                    tokenAmount.formatted(.none)
                 }
                 .joined(separator: " + ")
             let tokens = Text(_tokens)

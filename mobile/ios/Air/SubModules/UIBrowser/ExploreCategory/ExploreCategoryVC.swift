@@ -52,7 +52,7 @@ class ExploreCategoryVC: WViewController {
         super.viewDidLoad()
         exploreVM.refresh()
     }
-    struct Constants {
+    enum Constants {
         static let background = "background"
         static let groupHeader = "groupHeader"
         static let sectionHeader = "sectionHeader"
@@ -199,7 +199,10 @@ class ExploreCategoryVC: WViewController {
     
     func makeSnapshot() -> NSDiffableDataSourceSnapshot<Section, Item> {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        let exploreSites = exploreVM.exploreSites.values.filter { $0.categoryId == categoryId }
+        var exploreSites = exploreVM.exploreSites.values.filter { $0.categoryId == categoryId }
+        if ConfigStore.shared.shouldRestrictSites {
+            exploreSites = exploreSites.filter { !$0.canBeRestricted }
+        }
         
         if !exploreSites.isEmpty {
             snapshot.appendSections([.main])
